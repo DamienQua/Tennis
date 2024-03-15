@@ -2,3 +2,4 @@ ATP_ELO.txt
 WTA_ELO.txt
 Matchs.txt
 Reviewed_Matchs.txt
+*.pyc
