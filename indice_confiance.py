@@ -1,6 +1,7 @@
 from operator import length_hint
 from bs4 import BeautifulSoup
 from datetime import date
+import re
 
 def indice_confiance(indice_tab, session, admin_url, header, player_id, match_id, surface, flag, choix, match_url="") :
     if choix == "Motivation" :
@@ -80,8 +81,9 @@ def indice_confiance(indice_tab, session, admin_url, header, player_id, match_id
             return_second_serve = float(stats_match.find_all(class_="col-xs-4")[27+j2].text.strip().split("%")[0])
             points_save_bp = float(stats_match.find_all(class_="col-xs-4")[18+j2].text.strip().split("%")[0])
             return_save_bp = float(stats_match.find_all(class_="col-xs-4")[30+j2].text.strip().split("%")[0])
-            tie_break_j1 = stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0].text.strip().count("7-6")
-            tie_break_j2 = stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0].text.strip().count("6-7")
+            scores = re.sub(r"\([^)]*\)", "", stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0].text.strip())
+            tie_break_j1 = sum(int(s[0]) >= 6 and int(s[1]) >= 6 and int(s[0]) > int(s[1]) for score in scores.split(" ") for s in (score.split("-"),))
+            tie_break_j2 = sum(int(s[0]) >= 6 and int(s[1]) >= 6 and int(s[0]) < int(s[1]) for score in scores.split(" ") for s in (score.split("-"),))
             if flag == 0 :
                 indice_tab[6] = points_first_serve
                 indice_tab[7] = 100-points_first_serve
