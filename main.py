@@ -15,9 +15,11 @@ def main() :
     matchs = ""
     matchs_tab = np.chararray(256, itemsize = 100, unicode = True)
     i, t_i = 0, 0
-
-    with open("Reviewed_Matchs.txt", "r") as f:
-        already += f.read()
+    try :
+        with open("Reviewed_Matchs.txt", "r") as f:
+            already += f.read()
+    except :
+        already = ""
 
     with requests.Session() as session :
         ti = session.post("https://tennisinsight.com/wp-login.php", {"log" : "", "pwd" : ""}, headers = header)
