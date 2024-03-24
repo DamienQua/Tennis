@@ -15,7 +15,12 @@ def odds_match(match_vs, indice_tab) :
         odds = [] 
         for elem in driver.find_all(class_="gradient-green-added-border") :
             if elem['class'][0] == "height-content" :
-                odds.append(elem.text)
+                if "-" in elem.text :
+                    odds.append(round(100/int(elem.text.replace("-",""))+1, 2))
+                elif "+" in elem.text :
+                    odds.append(round(int(elem.text.replace("+",""))/100+1, 2))
+                else :
+                    odds.append(elem.text)
         match = match[0].text.strip()
         if match.find(match_vs[2].split(" ")[-1]) < match.find(match_vs[3].split(" ")[-1]) :
             if float(odds[0]) > float(odds[1]) :
@@ -42,7 +47,12 @@ def odds_match(match_vs, indice_tab) :
             odds = [] 
             for elem in driver.find_all(class_="gradient-green-added-border") :
                 if elem['class'][0] == "height-content" :
-                    odds.append(elem.text)
+                    if "-" in elem.text :
+                        odds.append(100/int(elem.text.replace("-",""))+1)
+                    elif "+" in elem.text :
+                        odds.append(int(elem.text.replace("+",""))/100+1)
+                    else :
+                        odds.append(elem.text)
             match = match[0].text.strip()
             if match.find(match_vs[2].split(" ")[-1]) < match.find(match_vs[3].split(" ")[-1]) :
                 if float(odds[0]) > float(odds[1]) :
