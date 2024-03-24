@@ -48,9 +48,9 @@ def odds_match(match_vs, indice_tab) :
             for elem in driver.find_all(class_="gradient-green-added-border") :
                 if elem['class'][0] == "height-content" :
                     if "-" in elem.text :
-                        odds.append(100/int(elem.text.replace("-",""))+1)
+                        odds.append(round(100/int(elem.text.replace("-",""))+1, 2))
                     elif "+" in elem.text :
-                        odds.append(int(elem.text.replace("+",""))/100+1)
+                        odds.append(round(int(elem.text.replace("+",""))/100+1, 2))
                     else :
                         odds.append(elem.text)
             match = match[0].text.strip()
