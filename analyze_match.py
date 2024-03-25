@@ -1,10 +1,7 @@
-import imp
-from os import supports_fd
 import numpy as np
-import requests
 import time
 import jaro
-from datetime import datetime
+from itertools import takewhile
 from bs4 import BeautifulSoup
 from h2h_table import h2h_table
 from last_matchs import last_matchs
@@ -67,7 +64,8 @@ def analyze_match(cpt, session, header, match, tournaments, elo) :
     elo_A, elo_B = "", ""
     err = 0
     for player in elo.split("\n") :
-        if jaro.jaro_winkler_metric(match_vs[2], player) >= 0.75 and elo_A == "" :
+        player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
+        if jaro.jaro_winkler_metric(match_vs[2], player_vs) >= 0.80 and elo_A == "" :
             while not elo_A.replace(".","").isdigit() : 
                 if "Hard" in surface :
                     elo_A = player.replace("-", " ").split(" ")[match_vs[2].replace("-", " ").count(" ")+1+err]
@@ -76,7 +74,7 @@ def analyze_match(cpt, session, header, match, tournaments, elo) :
                 else :
                     elo_A = player.replace("-", " ").split(" ")[match_vs[2].replace("-", " ").count(" ")+3+err]
                 err += 1
-        if jaro.jaro_winkler_metric(match_vs[3], player) >= 0.75 and elo_B == "" :
+        if jaro.jaro_winkler_metric(match_vs[3], player_vs) >= 0.80 and elo_B == "" :
             while not elo_B.replace(".","").isdigit() :
                 if "Hard" in surface :
                     elo_B = player.replace("-", " ").split(" ")[match_vs[3].replace("-", " ").count(" ")+1+err]
