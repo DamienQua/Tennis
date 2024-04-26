@@ -35,7 +35,13 @@ def main() :
                 if "fruhvirtova" not in m and "noskova" not in m and "efremova" not in m and "andreeva" not in m and "krueger" not in m :#and m not in already :
                     continue
             start = time.perf_counter()
-            m_i = analyze_match(i, session, header, m, tournaments, atp_elo + '\n' + wta_elo if ("atp" in m or ("wta" not in m and "masters" in m)) else wta_elo + '\n' + atp_elo)
+            while True :
+                try :
+                    m_i = analyze_match(i, session, header, m, tournaments, atp_elo + '\n' + wta_elo if ("atp" in m or ("wta" not in m and "masters" in m)) else wta_elo + '\n' + atp_elo)
+                    break
+                except requests.exceptions.ConnectionError :
+                    print("Erreur de connexion, nouvelle tentative...")   
+                    time.sleep(1)
             m_i += ", " + m 
             matchs += m_i + "\n"
             matchs_tab[i] = m_i
