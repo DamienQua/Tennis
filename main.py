@@ -5,6 +5,7 @@ import time
 import numpy as np
 from ELO_table import ELO_table
 from analyze_match import analyze_match
+from aiolimiter import AsyncLimiter
 
 async def fetch_data(session, url, method='get', data=None):
     if method == 'get':
@@ -31,7 +32,10 @@ async def main():
     except:
         pass
 
-    async with aiohttp.ClientSession(headers=header) as session:
+    rate_limit = AsyncLimiter(10, 1)  # 10 requests per second
+    conn = aiohttp.TCPConnector(limit=10)  # 10 simultaneous connections
+
+    async with aiohttp.ClientSession(connector=conn, headers=header) as session:
         login_data = {"log": "", "pwd": ""}
         await fetch_data(session, "https://tennisinsight.com/wp-login.php", method='post', data=login_data)
 
@@ -50,7 +54,8 @@ async def main():
             start = time.perf_counter()
             
             try:
-                m_i = await analyze_match(i, session, header, m, tournaments, atp_elo + '\n' + wta_elo if ("atp" in m or ("wta" not in m and "masters" in m)) else wta_elo + '\n' + atp_elo)
+                async with rate_limit:
+                    m_i = await analyze_match(session, header, m, tournaments, atp_elo + '\n' + wta_elo if ("atp" in m or ("wta" not in m and "masters" in m)) else wta_elo + '\n' + atp_elo)
             except aiohttp.ClientError:
                 print("Connection error, retrying...")
                 await asyncio.sleep(1)

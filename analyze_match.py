@@ -1,4 +1,4 @@
-import aiohttp
+import asyncio
 from bs4 import BeautifulSoup
 import time
 import numpy as np
@@ -19,7 +19,7 @@ async def fetch_data(session, url, method='get', data=None):
         async with session.post(url, data=data) as response:
             return await response.text()
 
-async def analyze_match(cpt, session, header, match, tournaments, elo):
+async def analyze_match(session, header, match, tournaments, elo):
     today = time.time()
     match_vs = np.chararray(42, itemsize=100, unicode=True)
     indice_tab = np.zeros(25)
@@ -33,7 +33,6 @@ async def analyze_match(cpt, session, header, match, tournaments, elo):
     overview_data = await fetch_data(session, admin_url, 'post', {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id})
     data = BeautifulSoup(overview_data, "lxml")
 
-    # Tour and Surface
     same_tour = np.zeros(len(tournaments), float)
     for tourn in tournaments:
         same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(match.split("2024-")[1].split("/")[0], tourn.split(" (")[0].lower())
@@ -41,37 +40,31 @@ async def analyze_match(cpt, session, header, match, tournaments, elo):
     match_vs[0] = tour
     match_vs[1] = surface
 
-    await indice_confiance(indice_tab, session, admin_url, header, pA_id, match_id, surface, 0, "Motivation")
-    await indice_confiance(indice_tab, session, admin_url, header, pB_id, match_id, surface, 1, "Motivation")
+    tasks = [
+        indice_confiance(indice_tab, session, admin_url, header, pA_id, match_id, surface, 0, "Motivation"),
+        indice_confiance(indice_tab, session, admin_url, header, pB_id, match_id, surface, 1, "Motivation"),
+        h2h_table(data, match_vs, surface, indice_tab, session, admin_url, header, match_id),
+        last_matchs(session, today, match_vs, admin_url, header, pA_id, match_id, 0),
+        last_matchs(session, today, match_vs, admin_url, header, pB_id, match_id, 1)
+    ]
 
-    # Player A vs Player B
+    await asyncio.gather(*tasks)
+
     for i in range(1, 3):
-        match_vs[i+1] = data.text.split("for ")[i].split("\n")[0].replace("-Vinolas","").replace(" Vitus Nodskov", "")
+            match_vs[i+1] = data.text.split("for ")[i].split("\n")[0].replace("-Vinolas","").replace(" Vitus Nodskov", "")
 
-    # Rank A vs Rank B
     for i in range(2):
         try:
             match_vs[i+4] = int(data.text.replace("Unknown","1000").split("(HI")[i].split("\n")[-1].strip())
         except:
             match_vs[i+4] = 1000
-    
-    # H2H 
-    await h2h_table(data, match_vs, surface, indice_tab, session, admin_url, header, match_id)
-
-    # Stats
-    # Player A
-    await last_matchs(session, today, match_vs, admin_url, header, pA_id, match_id, 0)
-    # Player B
-    await last_matchs(session, today, match_vs, admin_url, header, pB_id, match_id, 1)
-
+            
     compare_players(match_vs)
 
-    # Odds Match
     match_vs, indice_tab = await odds_match(match_vs, indice_tab)
 
     compare_indice(indice_tab, match_vs)
 
-    # ELOs
     elo_A, elo_B = "", ""
     err = 0
     for player in elo.split("\n"):
