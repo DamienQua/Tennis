@@ -1,8 +1,8 @@
 import aiohttp
 from bs4 import BeautifulSoup
-from datetime import datetime
 import re
 from indice_confiance import indice_confiance
+from h2h_stats import H2HStats, DateUtils
 
 class MatchContext:
     def __init__(self, surface, admin_url, header, match_id):
@@ -10,72 +10,6 @@ class MatchContext:
         self.admin_url = admin_url
         self.header = header
         self.match_id = match_id
-
-class DateUtils:
-    @staticmethod
-    def parse_date(date_str):
-        return datetime.strptime(date_str.strip(), "%b %d %Y").timestamp()
-
-    @staticmethod
-    def is_within_last_year(date_ms):
-        today = datetime.now().timestamp()
-        year_ms = 365.25 * 24 * 3600
-        return today - date_ms <= year_ms
-
-class H2HStats:
-    def __init__(self, player_a, player_b):
-        self.player_a = player_a
-        self.player_b = player_b
-        self.winA_all = self.winB_all = 0
-        self.winA_y = self.winB_y = 0
-        self.winA_sur = self.winB_sur = 0
-        self.winA_G = self.winB_G = 0
-        self.h2h_nb = self.h2h_y = 0
-
-    def update_stats(self, winner, date_ms, surface, score):
-        self.h2h_nb += 1
-        if winner == self.player_a:
-            self._update_player_a_stats(date_ms, surface, score)
-        else:
-            self._update_player_b_stats(date_ms, surface, score)
-
-    def _update_player_a_stats(self, date_ms, surface, score):
-        self.winA_all += 1
-        if DateUtils.is_within_last_year(date_ms):
-            self.winA_y += 1
-            self.h2h_y += 1
-        if surface in score:
-            self.winA_sur += 1
-        self._update_game_stats(score, 0)
-
-    def _update_player_b_stats(self, date_ms, surface, score):
-        self.winB_all += 1
-        if DateUtils.is_within_last_year(date_ms):
-            self.winB_y += 1
-            self.h2h_y += 1
-        if surface in score:
-            self.winB_sur += 1
-        self._update_game_stats(score, 1)
-
-    def _update_game_stats(self, score, loser_index):
-        for set_score in score.split(" "):
-            try:
-                self.winA_G += int(set_score.split("-")[loser_index])
-                self.winB_G += int(set_score.split("-")[1-loser_index])
-            except:
-                pass
-
-    def calculate_percentages(self):
-        return {
-            "all_time": self._calculate_percentage(self.winA_all, self.winB_all),
-            "last_year": self._calculate_percentage(self.winA_y, self.winB_y),
-            "surface": self._calculate_percentage(self.winA_sur, self.winB_sur),
-            "games": self._calculate_percentage(self.winA_G, self.winB_G)
-        }
-
-    def _calculate_percentage(self, wins_a, wins_b):
-        total = wins_a + wins_b
-        return (round(100 * wins_a / total, 2), round(100 * wins_b / total, 2)) if total > 0 else (0, 0)
 
 async def fetch_data(session, url, data=None):
     async with session.post(url, data=data) as response:
@@ -125,4 +59,4 @@ async def h2h_table(data, match_vs, session, indice_tab, match_context: MatchCon
         indice_tab[5] = 2*indice_tab[3]
 
     if go != "":
-        await indice_confiance(indice_tab, session, match_context.admin_url, "", match_context.match_id, match_context.surface, flag, "Tactique", go)   
+        await indice_confiance(indice_tab, session, match_context.admin_url, "", match_context.match_id, match_context.surface, flag, "Tactique", go)
