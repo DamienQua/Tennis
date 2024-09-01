@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import re
 from indice_confiance import indice_confiance
 from h2h_stats import H2HStats, DateUtils
+from variables import indice_tab
 
 class MatchContext:
     def __init__(self, surface, admin_url, header, match_id):
@@ -64,16 +65,17 @@ class H2HDataProcessor:
         percentages = self.stats.calculate_percentages()
         self.match_vs[8:14] = percentages["last_year"] + percentages["surface"] + percentages["games"]
 
-async def h2h_table(data, match_vs, session, indice_tab, match_context: MatchContext):
+async def h2h_table(data, match_vs, session, match_context: MatchContext):
     processor = H2HDataProcessor(data, match_vs)
     processor.process_h2h_data()
 
+    global indice_tab
     if processor.stats.winA_sur > 0:
         indice_tab[4] = 2*indice_tab[1]
     if processor.stats.winB_sur > 0:
         indice_tab[5] = 2*indice_tab[3]
 
     if processor.go != "":
-        await indice_confiance(indice_tab, session, match_context.admin_url, "", match_context.match_id, match_context.surface, processor.flag, "Tactique", processor.go)
+        await indice_confiance(session, match_context.admin_url, "", match_context.match_id, match_context.surface, processor.flag, "Tactique", processor.go)
 
-    return match_vs, indice_tab
+    return match_vs

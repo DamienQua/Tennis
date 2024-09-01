@@ -10,6 +10,7 @@ from compare_players import compare_players
 from odds_match import odds_match
 from indice_confiance import indice_confiance
 from compare_indice import compare_indice
+from variables import indice_tab
 
 async def fetch_data(session, url, method='get', data=None):
     if method == 'get':
@@ -20,9 +21,9 @@ async def fetch_data(session, url, method='get', data=None):
             return await response.text()
 
 async def analyze_match(session, header, match, tournaments, elo):
+    global indice_tab
     today = time.time()
     match_vs = np.chararray(42, itemsize=100, unicode=True)
-    indice_tab = np.zeros(25)
     admin_url = "https://tennisinsight.com/wp-admin/admin-ajax.php"
 
     abc = await fetch_data(session, match)
@@ -41,9 +42,9 @@ async def analyze_match(session, header, match, tournaments, elo):
     match_vs[1] = surface
 
     tasks = [
-        indice_confiance(indice_tab, session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
-        indice_confiance(indice_tab, session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
-        h2h_table(data, match_vs, session, indice_tab, MatchContext(surface, admin_url, header, match_id)),
+        indice_confiance(session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
+        indice_confiance(session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
+        h2h_table(data, match_vs, session, MatchContext(surface, admin_url, header, match_id)),
         last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0),
         last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1)
     ]
@@ -51,7 +52,7 @@ async def analyze_match(session, header, match, tournaments, elo):
     await asyncio.gather(*tasks)
 
     for i in range(1, 3):
-            match_vs[i+1] = data.text.split("for ")[i].split("\n")[0].replace("-Vinolas","").replace(" Vitus Nodskov", "")
+        match_vs[i+1] = data.text.split("for ")[i].split("\n")[0].replace("-Vinolas","").replace(" Vitus Nodskov", "")
 
     for i in range(2):
         try:
