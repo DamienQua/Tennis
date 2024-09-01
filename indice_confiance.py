@@ -7,7 +7,7 @@ async def fetch_data(session, url, data):
     async with session.post(url, data=data) as response:
         return await response.text()
 
-async def indice_confiance(indice_tab, session, admin_url, header, player_id, match_id, surface, flag, choix, match_url=""):
+async def indice_confiance(indice_tab, session, admin_url, player_id, match_id, surface, flag, choix, match_url=""):
     if choix == "Motivation":
         pAB_param = {"action": "playerActivity", "activityOffset": "0", "basic-activity-option": "3", "odds": "0", "filterType": "basic", "playerID": player_id, "matchID": match_id}
         data_html = await fetch_data(session, admin_url, pAB_param)

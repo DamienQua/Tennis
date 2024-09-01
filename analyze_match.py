@@ -4,7 +4,7 @@ import time
 import numpy as np
 import jaro
 from itertools import takewhile
-from h2h_table import h2h_table
+from h2h_table import h2h_table, MatchContext
 from last_matchs import last_matchs
 from compare_players import compare_players
 from odds_match import odds_match
@@ -41,9 +41,9 @@ async def analyze_match(session, header, match, tournaments, elo):
     match_vs[1] = surface
 
     tasks = [
-        indice_confiance(indice_tab, session, admin_url, header, pA_id, match_id, surface, 0, "Motivation"),
-        indice_confiance(indice_tab, session, admin_url, header, pB_id, match_id, surface, 1, "Motivation"),
-        h2h_table(data, match_vs, surface, indice_tab, session, admin_url, header, match_id),
+        indice_confiance(indice_tab, session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
+        indice_confiance(indice_tab, session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
+        h2h_table(data, match_vs, session, indice_tab, MatchContext(surface, admin_url, header, match_id)),
         last_matchs(session, today, match_vs, admin_url, header, pA_id, match_id, 0),
         last_matchs(session, today, match_vs, admin_url, header, pB_id, match_id, 1)
     ]
