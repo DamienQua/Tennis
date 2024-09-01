@@ -1,38 +1,50 @@
 from math import ceil
 
-def compare_indice(indice_tab, match_vs) :
-    comp = [0, 0, 0]
-    for k in range(len(indice_tab)) :
-        if k in (0, 1, 4, 20, 22) :
-            if indice_tab[k] > indice_tab[k+1] :
-                comp[0] += 20
-            elif indice_tab[k] < indice_tab[k+1] :
-                comp[1] += 20
-        if k in (6, 8, 10, 12, 14, 16, 18) :
-            if indice_tab[k] > indice_tab[k+1] :
-                comp[0] += 5*ceil((indice_tab[k]-indice_tab[k+1])/10)
-            if indice_tab[k] < indice_tab[k+1] :
-                comp[1] += 5*ceil((indice_tab[k+1]-indice_tab[k])/10)
-    
-    comp[2] = comp[0] + comp[1]
+class IndiceComparator:
+    def __init__(self, indice_tab):
+        self.indice_tab = indice_tab
+        self.comp = [0, 0, 0]
 
-    if match_vs[36] < match_vs[37] :
-        if 0 <= comp[0]/comp[2] < 0.25 :
-            indice_tab[24] = 0.5
-        elif 0.25 <= comp[0]/comp[2] < 0.5 :
-            indice_tab[24] = 1
-        elif 0.5 <= comp[0]/comp[2] < 0.75 :
-            indice_tab[24] = 2
-        else :
-            indice_tab[24] = 3
-    elif match_vs[37] > match_vs[36] :
-        if 0 <= comp[1]/comp[2] < 0.25 :
-            indice_tab[24] = 0.5
-        elif 0.25 <= comp[1]/comp[2] < 0.5 :
-            indice_tab[24] = 1
-        elif 0.5 <= comp[1]/comp[2] < 0.75 :
-            indice_tab[24] = 2
-        else :
-            indice_tab[24] = 3
-    else :
-        indice_tab[24] = 1
+    def compare_indices(self):
+        self._compare_specific_indices()
+        self._compare_range_indices()
+        self.comp[2] = self.comp[0] + self.comp[1]
+        return self.comp
+
+    def _compare_specific_indices(self):
+        for k in (0, 1, 4, 20, 22):
+            if self.indice_tab[k] > self.indice_tab[k+1]:
+                self.comp[0] += 20
+            elif self.indice_tab[k] < self.indice_tab[k+1]:
+                self.comp[1] += 20
+
+    def _compare_range_indices(self):
+        for k in (6, 8, 10, 12, 14, 16, 18):
+            if self.indice_tab[k] > self.indice_tab[k+1]:
+                self.comp[0] += 5*ceil((self.indice_tab[k]-self.indice_tab[k+1])/10)
+            if self.indice_tab[k] < self.indice_tab[k+1]:
+                self.comp[1] += 5*ceil((self.indice_tab[k+1]-self.indice_tab[k])/10)
+
+def calculate_indice_24(comp, match_vs):
+    if match_vs[36] < match_vs[37]:
+        return _calculate_indice_24_helper(comp[0], comp[2])
+    elif match_vs[37] > match_vs[36]:
+        return _calculate_indice_24_helper(comp[1], comp[2])
+    else:
+        return 1
+
+def _calculate_indice_24_helper(comp_value, comp_total):
+    ratio = comp_value / comp_total
+    if 0 <= ratio < 0.25:
+        return 0.5
+    elif 0.25 <= ratio < 0.5:
+        return 1
+    elif 0.5 <= ratio < 0.75:
+        return 2
+    else:
+        return 3
+
+def compare_indice(indice_tab, match_vs):
+    comparator = IndiceComparator(indice_tab)
+    comp = comparator.compare_indices()
+    indice_tab[24] = calculate_indice_24(comp, match_vs)
