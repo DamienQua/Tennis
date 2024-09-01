@@ -62,65 +62,81 @@ class TennisMatchAnalyzer:
         self.stats_processor = StatisticsProcessor()
 
     async def analyze_match(self, today, match_vs, player_id, match_id, last_flag):
-        tour_now = await self.data_fetcher.fetch_tournament_data(match_id)
+        tour_now = await self.fetch_tournament_data(match_id)
+        win_percentages = await self.calculate_win_percentages(player_id, match_id)
+        match_stats = await self.process_match_statistics(player_id, match_id, tour_now)
+        nb_match_last_month = await self.calculate_matches_last_month(today, player_id, match_id)
 
+        self.update_match_vs(match_vs, win_percentages, match_stats, nb_match_last_month, last_flag)
+
+        return match_vs
+
+    async def fetch_tournament_data(self, match_id):
+        return await self.data_fetcher.fetch_tournament_data(match_id)
+
+    async def calculate_win_percentages(self, player_id, match_id):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
-        last_10_winAB, last_50_winAB, last_12m_winAB_all, winAB_all = self.stats_processor.calculate_win_percentages(data)
+        all_percentages = self.stats_processor.calculate_win_percentages(data)
 
+        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 2)
+        surface_percentages = self.stats_processor.calculate_win_percentages(data)[2:]
+
+        return all_percentages + surface_percentages
+
+    async def process_match_statistics(self, player_id, match_id, tour_now):
+        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
+        pAB_matchs = data.find_all(class_="activity-clickthroughs no-link")
+        
+        min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0
+        for m_i, match in enumerate(pAB_matchs):
+            if tour_now in data.find(id="activity-table").find("a").text:
+                try:
+                    new_stats = await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
+                    min_tour += new_stats[0]
+                    if m_i == 1 and "Qualifying" not in data.text:
+                        per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
+                except:
+                    pass
+
+        return min_tour, per_first_serve, points_first_serve, per_save_bp
+
+    async def calculate_matches_last_month(self, today, player_id, match_id):
+        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
         show_class = data.find(id="activity-table").find_all(class_="show")
+        
         nb_match_last_month = 0
         date_i = 1
         one_month = 2629800
-        pAB_matchs = data.find_all(class_="activity-clickthroughs no-link")
-        m_i = 0
-        min_tour = 0
-        per_first_serve, points_first_serve, per_save_bp = 0, 0, 0
 
         for i in range(2, len(show_class)):
             if show_class[i].text != "Date":
                 if today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month:
                     nb_match_last_month += 1
             else:
-                if m_i + nb_match_last_month != 0:
-                    date_i += m_i + nb_match_last_month + 1
-                else:
-                    date_i = i + 1
-                if show_class[date_i].text == "Date":
-                    date_i += 1
-                d = None
-                while d is None:
-                    try:
-                        d = datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp()
-                    except ValueError:
-                        date_i -= 1
+                date_i = self.update_date_index(show_class, i, date_i, nb_match_last_month)
                 if today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() > one_month:
                     break
-            if tour_now in data.find(id="activity-table").find("a").text:
-                try:
-                    new_min_tour, new_per_first_serve, new_points_first_serve, new_per_save_bp = await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
-                    min_tour += new_min_tour
-                    if m_i == 1 and "Qualifying" not in data.text:
-                        per_first_serve, points_first_serve, per_save_bp = new_per_first_serve, new_points_first_serve, new_per_save_bp
-                except:
-                    pass
-                m_i += 1
 
-        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 2)
-        last_12m_winAB_sur, winAB_sur = self.stats_processor.calculate_win_percentages(data)[2:]
+        return nb_match_last_month
 
-        match_vs[14+11*last_flag] = winAB_all
-        match_vs[15+11*last_flag] = winAB_sur
-        match_vs[16+11*last_flag] = last_12m_winAB_all
-        match_vs[17+11*last_flag] = last_12m_winAB_sur
-        match_vs[18+11*last_flag] = last_50_winAB
-        match_vs[19+11*last_flag] = last_10_winAB
-        match_vs[20+11*last_flag] = nb_match_last_month
-        match_vs[21+11*last_flag] = min_tour
-        match_vs[22+11*last_flag] = per_first_serve
-        match_vs[23+11*last_flag] = points_first_serve
-        match_vs[24+11*last_flag] = per_save_bp
+    def update_date_index(self, show_class, i, date_i, nb_match_last_month):
+        if nb_match_last_month != 0:
+            date_i += nb_match_last_month + 1
+        else:
+            date_i = i + 1
+        if show_class[date_i].text == "Date":
+            date_i += 1
+        while True:
+            try:
+                datetime.strptime(show_class[date_i].text, "%b %d %Y")
+                break
+            except ValueError:
+                date_i -= 1
+        return date_i
 
-        return match_vs
+    def update_match_vs(self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag):
+        offset = 14 + 11 * last_flag
+        match_vs[offset:offset+11] = win_percentages + [nb_match_last_month] + list(match_stats)
 
 async def last_matchs(session, today, match_vs, admin_url, player_id, match_id, last_flag):
     analyzer = TennisMatchAnalyzer(session, admin_url)
