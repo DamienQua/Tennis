@@ -44,8 +44,8 @@ async def analyze_match(session, header, match, tournaments, elo):
         indice_confiance(indice_tab, session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
         indice_confiance(indice_tab, session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
         h2h_table(data, match_vs, session, indice_tab, MatchContext(surface, admin_url, header, match_id)),
-        last_matchs(session, today, match_vs, admin_url, header, pA_id, match_id, 0),
-        last_matchs(session, today, match_vs, admin_url, header, pB_id, match_id, 1)
+        last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0),
+        last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1)
     ]
 
     await asyncio.gather(*tasks)
