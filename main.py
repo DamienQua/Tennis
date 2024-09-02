@@ -10,6 +10,45 @@ from collections import namedtuple
 
 SessionConfig = namedtuple('SessionConfig', ['header', 'connector', 'rate_limit'])
 
+class MatchProcessor:
+    def __init__(self, session, header, rate_limit, already_processed):
+        self.session = session
+        self.header = header
+        self.rate_limit = rate_limit
+        self.already_processed = already_processed
+
+    def should_process_match(self, match_url):
+        return (("2024" in match_url) and 
+                (any(subword in match_url for subword in ("atp", "wta", "masters"))) and 
+                not ("/q/" in match_url or "tba-tba" in match_url) and 
+                match_url not in self.already_processed)
+
+    async def fetch_and_analyze(self, match_url, tournaments, elo_data):
+        async with self.rate_limit:
+            return await analyze_match(self.session, self.header, match_url, tournaments, elo_data)
+
+    def format_result(self, match_info, match_url):
+        return f"{match_info}, {match_url}"
+
+    async def process(self, match_url, tournaments, elo_data):
+        if not self.should_process_match(match_url):
+            if "fruhvirtova" not in match_url and "noskova" not in match_url and "efremova" not in match_url and "andreeva" not in match_url and "krueger" not in match_url:
+                return None
+
+        start = time.perf_counter()
+
+        try:
+            match_info = await self.fetch_and_analyze(match_url, tournaments, elo_data)
+        except aiohttp.ClientError:
+            print("Connection error, retrying...")
+            await asyncio.sleep(1)
+            return None
+
+        result = self.format_result(match_info, match_url)
+        print("Match : ", result)
+        print("Time elapsed : ", round(time.perf_counter() - start, 2), " sec")
+        return result
+
 async def fetch_data(session, url, method='get', data=None):
     if method == 'get':
         async with session.get(url) as response:
@@ -42,26 +81,6 @@ async def fetch_match_previews(session):
     mtch = [m.a["href"] for m in mtch_previews.find_all(class_="match-row-link")]
     return tournaments, mtch
 
-async def process_match(session, header, m, tournaments, elo_data, rate_limit, already):
-    if not(("2024" in m) and (any(subword in m for subword in ("atp", "wta", "masters"))) and not ("/q/" in m or "tba-tba" in m)) or m in already:
-        if "fruhvirtova" not in m and "noskova" not in m and "efremova" not in m and "andreeva" not in m and "krueger" not in m:
-            return None
-    
-    start = time.perf_counter()
-    
-    try:
-        async with rate_limit:
-            m_i = await analyze_match(session, header, m, tournaments, elo_data)
-    except aiohttp.ClientError:
-        print("Connection error, retrying...")
-        await asyncio.sleep(1)
-        return None
-
-    m_i += ", " + m 
-    print("Match : ", m_i)
-    print("Time elapsed : ", round(time.perf_counter() - start, 2), " sec")
-    return m_i
-
 def update_match_files(m_i, matchs):
     with open("Reviewed_Matchs.txt", "a") as old:
         old.write(m_i + "\n")
@@ -83,9 +102,11 @@ async def main():
         await login(session)
         tournaments, mtch = await fetch_match_previews(session)
         
+        processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
+        
         for m in mtch:
             elo_data = atp_elo + '\n' + wta_elo if ("atp" in m or ("wta" not in m and "masters" in m)) else wta_elo + '\n' + atp_elo
-            m_i = await process_match(session, session_config.header, m, tournaments, elo_data, session_config.rate_limit, already)
+            m_i = await processor.process(m, tournaments, elo_data)
             
             if m_i:
                 matchs += m_i + "\n"
