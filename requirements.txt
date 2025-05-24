@@ -5,3 +5,4 @@ jaro-winkler
 aiolimiter
 asyncio
 lxml
+openpyxl

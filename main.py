@@ -18,7 +18,7 @@ class MatchProcessor:
         self.already_processed = already_processed
 
     def should_process_match(self, match_url):
-        return (("2024" in match_url) and 
+        return (("2025" in match_url) and 
                 (any(subword in match_url for subword in ("atp", "wta", "masters"))) and 
                 not ("/q/" in match_url or "tba-tba" in match_url) and 
                 match_url not in self.already_processed)

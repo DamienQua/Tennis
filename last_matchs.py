@@ -15,18 +15,23 @@ class TennisDataFetcher:
         tour_now_html = await self.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id})
         return BeautifulSoup(tour_now_html, "lxml").find(id="basic-this-tournament-A")["value"].split("At ")[1]
 
-    async def fetch_player_activity(self, player_id, match_id, activity_option):
+    async def fetch_player_activity(self, player_id, match_id, activity_option, odds_option = "0"):
         pAB_param = {
             "action": "playerActivity",
             "activityOffset": "0",
             "basic-activity-option": str(activity_option),
-            "odds": "0",
+            "odds": str(odds_option),
             "filterType": "basic",
             "playerID": player_id,
             "matchID": match_id
         }
         data_html = await self.fetch_data(self.admin_url, pAB_param)
         return BeautifulSoup(data_html, "lxml")
+    
+    async def fetch_player_activity_with_odds(self, player_id, match_id, activity_option, flag, favorite):
+        odds_option = "5" if favorite[flag] == 1 else "6"
+        return await self.fetch_player_activity(player_id, match_id, activity_option, odds_option)
+
 
     async def fetch_match_statistics(self, pAB_match):
         stats_match_html = await self.fetch_data(self.admin_url, {"action": pAB_match.find_all("a")[1]["data-action"], "matchID": pAB_match.find_all("a")[1]["data-matchid"]})
@@ -61,13 +66,21 @@ class TennisMatchAnalyzer:
         self.data_fetcher = TennisDataFetcher(session, admin_url)
         self.stats_processor = StatisticsProcessor()
 
-    async def analyze_match(self, today, match_vs, player_id, match_id, last_flag):
+    async def analyze_match(self, today, match_vs, player_id, match_id, last_flag, favorite):
         tour_now = await self.fetch_tournament_data(match_id)
         win_percentages = await self.calculate_win_percentages(player_id, match_id)
         match_stats = await self.process_match_statistics(player_id, match_id, tour_now)
         nb_match_last_month = await self.calculate_matches_last_month(today, player_id, match_id)
 
         self.update_match_vs(match_vs, win_percentages, match_stats, nb_match_last_month, last_flag)
+
+        odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(player_id, match_id, 1, last_flag, favorite)
+        odds_data = odds_spread.find(class_="stats-table").find_all("tr")[2].find_all("td")[1].text.strip().split()
+        
+        odds_index = 2 if favorite[last_flag] == 1 else 0
+        odds_value = float(odds_data[odds_index])
+        
+        match_vs[42 + last_flag] = -odds_value if favorite[last_flag] == 1 else odds_value
 
         return match_vs
 
@@ -89,14 +102,16 @@ class TennisMatchAnalyzer:
         
         min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0
         for m_i, match in enumerate(pAB_matchs):
-            if tour_now in data.find(id="activity-table").find("a").text:
+            if tour_now.lower().replace(" ", "-") in match.contents[1]["href"]:
                 try:
                     new_stats = await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
                     min_tour += new_stats[0]
-                    if m_i == 1 and "Qualifying" not in data.text:
+                    if m_i == 0 and "Qualifying" not in data.text:
                         per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
                 except:
                     pass
+            else:
+                break
 
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
@@ -138,6 +153,6 @@ class TennisMatchAnalyzer:
         offset = 14 + 11 * last_flag
         match_vs[offset:offset+11] = win_percentages + [nb_match_last_month] + list(match_stats)
 
-async def last_matchs(session, today, match_vs, admin_url, player_id, match_id, last_flag):
+async def last_matchs(session, today, match_vs, admin_url, player_id, match_id, last_flag, favorite):
     analyzer = TennisMatchAnalyzer(session, admin_url)
-    return await analyzer.analyze_match(today, match_vs, player_id, match_id, last_flag)
+    return await analyzer.analyze_match(today, match_vs, player_id, match_id, last_flag, favorite)

@@ -21,28 +21,27 @@ class H2HStats:
         self.winA_G = self.winB_G = 0
         self.h2h_nb = self.h2h_y = 0
 
-    def update_stats(self, winner, date_ms, surface, score):
-        self.h2h_nb += 1
-        if winner == self.player_a:
-            self._update_player_a_stats(date_ms, surface, score)
+    def update_stats(self, winner, date_ms, surface, score, current_surface):
+        if winner in self.player_a:
+            self._update_player_a_stats(date_ms, surface, score, current_surface)
         else:
-            self._update_player_b_stats(date_ms, surface, score)
+            self._update_player_b_stats(date_ms, surface, score, current_surface)
 
-    def _update_player_a_stats(self, date_ms, surface, score):
+    def _update_player_a_stats(self, date_ms, surface, score, current_surface):
         self.winA_all += 1
         if DateUtils.is_within_last_year(date_ms):
             self.winA_y += 1
             self.h2h_y += 1
-        if surface in score:
+        if current_surface in surface:
             self.winA_sur += 1
         self._update_game_stats(score, 0)
 
-    def _update_player_b_stats(self, date_ms, surface, score):
+    def _update_player_b_stats(self, date_ms, surface, score, current_surface):
         self.winB_all += 1
         if DateUtils.is_within_last_year(date_ms):
             self.winB_y += 1
             self.h2h_y += 1
-        if surface in score:
+        if current_surface in surface:
             self.winB_sur += 1
         self._update_game_stats(score, 1)
 

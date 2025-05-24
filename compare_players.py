@@ -48,6 +48,7 @@ class Match:
 
     def compare_players(self):
         self.compare_attributes()
+        self.add_odds_spread()
         self.calculate_odds()
         return self.data
 
@@ -58,8 +59,12 @@ class Match:
                 self.comp[0] += comp_a
                 self.comp[1] += comp_b
 
-    def calculate_odds(self):
+    def add_odds_spread(self):
+        self.comp[0] += float(self.data[42]) * 5
+        self.comp[1] += float(self.data[43]) * 5
         self.comp[2] = self.comp[0] + self.comp[1]
+
+    def calculate_odds(self):
         trj = 0.9
         if self.comp[0] <= self.comp[1]:
             oddsA = round(trj * self.comp[2] / (self.comp[0] + 1e-3), 2)

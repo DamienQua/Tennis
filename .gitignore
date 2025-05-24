@@ -3,3 +3,5 @@ WTA_ELO.txt
 Matchs.txt
 Reviewed_Matchs.txt
 *.pyc
+*.xlsx
+Matchs

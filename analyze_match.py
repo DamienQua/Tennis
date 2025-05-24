@@ -10,6 +10,7 @@ from compare_players import compare_players
 from odds_match import odds_match
 from indice_confiance import indice_confiance
 from compare_indice import compare_indice
+from generate_match_xlsx import generate_match_xlsx
 from variables import indice_tab
 
 async def fetch_data(session, url, method='get', data=None):
@@ -28,7 +29,7 @@ def extract_player_ids(abc):
 def determine_tournament_and_surface(match, tournaments):
     same_tour = np.zeros(len(tournaments), float)
     for tourn in tournaments:
-        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(match.split("2024-")[1].split("/")[0], tourn.split(" (")[0].lower())
+        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(match.split("2025-")[1].split("/")[0], tourn.split(" (")[0].lower())
     tour, surface = tournaments[same_tour.argmax(0)].split(" (")[0], tournaments[same_tour.argmax(0)].split("- ")[1].split(" Court")[0]
     return tour, surface
 
@@ -42,14 +43,23 @@ def parse_player_rankings(data):
         rankings.append(ranking)
     return rankings
 
+def who_is_favorite(data):
+    try :
+        if float(data.find(class_="mp_bio_left").find_all("li")[-1].text.strip()) > float(data.find(class_="mp_bio_right").find_all("li")[-1].text.strip()):
+            return [1, 0]
+        else:
+            return [0, 1]
+    except:
+        return [0, 0]
+
 def find_elo_ratings(elo, match_vs, surface):
     elo_A, elo_B = "", ""
     for player in elo.split("\n"):
         player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
-        if jaro.jaro_winkler_metric(match_vs[2], player_vs) >= 0.85:
-            elo_A = extract_elo_rating(player, match_vs[2], surface)
-        if jaro.jaro_winkler_metric(match_vs[3], player_vs) >= 0.85:
-            elo_B = extract_elo_rating(player, match_vs[3], surface)
+        if jaro.jaro_winkler_metric(match_vs[2], player_vs) >= 0.9:
+            elo_A = extract_elo_rating(player, player_vs, surface)
+        if jaro.jaro_winkler_metric(match_vs[3], player_vs) >= 0.9:
+            elo_B = extract_elo_rating(player, player_vs, surface)
         if elo_A != "" and elo_B != "":
             break
     return elo_A, elo_B
@@ -70,7 +80,7 @@ def extract_elo_rating(player, player_name, surface):
 async def analyze_match(session, header, match, tournaments, elo):
     global indice_tab
     today = time.time()
-    match_vs = np.chararray(42, itemsize=100, unicode=True)
+    match_vs = np.chararray(44, itemsize=100, unicode=True)
     admin_url = "https://tennisinsight.com/wp-admin/admin-ajax.php"
 
     abc = await fetch_data(session, match)
@@ -84,21 +94,23 @@ async def analyze_match(session, header, match, tournaments, elo):
     match_vs[0] = tour
     match_vs[1] = surface
 
-    tasks = [
-        indice_confiance(session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
-        indice_confiance(session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
-        h2h_table(data, match_vs, session, MatchContext(surface, admin_url, header, match_id)),
-        last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0),
-        last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1)
-    ]
-
-    await asyncio.gather(*tasks)
-
     for i in range(1, 3):
         match_vs[i+1] = data.text.split("for ")[i].split("\n")[0].replace("-Vinolas","").replace(" Vitus Nodskov", "")
 
     rankings = parse_player_rankings(data)
     match_vs[4], match_vs[5] = rankings[0], rankings[1]
+
+    favorite = who_is_favorite(data)
+
+    tasks = [
+        indice_confiance(session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
+        indice_confiance(session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
+        h2h_table(data, match_vs, session, MatchContext(surface, admin_url, header, match_id)),
+        last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0, favorite),
+        last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1, favorite)
+    ]
+
+    await asyncio.gather(*tasks)
             
     compare_players(match_vs)
 
@@ -113,5 +125,7 @@ async def analyze_match(session, header, match, tournaments, elo):
     if elo_B.replace(".","").isdigit():
         match_vs[41] = elo_B
 
-    return ", ".join(match_vs[:4]) + ", " + ", ".join(match_vs[-6:]) + \
+    await generate_match_xlsx(match_vs)
+
+    return ", ".join(match_vs[:4]) + ", " + ", ".join(match_vs[-8:-2]) + \
            ", " + match_vs[15] + ", " + match_vs[26] + ", " + str(indice_tab[-1])
