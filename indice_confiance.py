@@ -60,18 +60,16 @@ class MotivationAnalyzer:
         return nb_matchs
 
     def calculate_motivation_index(self, cat, nb_matchs, flag):
+        index = 2 * flag
         if "250" in cat or "500" in cat:
             if nb_matchs < 0:
-                indice_tab[2*flag] = 0
+                indice_tab[index] = 0
             elif 0 <= nb_matchs < 2:
-                indice_tab[2*flag] = 50
+                indice_tab[index] = 50
             else: 
-                indice_tab[2*flag] = 100
-        if "1000" in cat or "Slam" in cat:
-            if nb_matchs < 0:
-                indice_tab[2*flag] = 50
-            else:
-                indice_tab[2*flag] = 100
+                indice_tab[index] = 100
+        elif "1000" in cat or "Slam" in cat:
+            indice_tab[index] = 50 if nb_matchs < 0 else 100
 
     async def analyze_surface_performance(self, match_id, surface, flag):
         stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})

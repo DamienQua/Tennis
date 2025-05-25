@@ -56,11 +56,11 @@ def find_elo_ratings(elo, match_vs, surface):
     elo_A, elo_B = "", ""
     for player in elo.split("\n"):
         player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
-        if jaro.jaro_winkler_metric(match_vs[2], player_vs) >= 0.9:
+        if elo_A == "" and jaro.jaro_winkler_metric(match_vs[2], player_vs) >= 0.9:
             elo_A = extract_elo_rating(player, player_vs, surface)
-        if jaro.jaro_winkler_metric(match_vs[3], player_vs) >= 0.9:
+        if elo_B == "" and jaro.jaro_winkler_metric(match_vs[3], player_vs) >= 0.9:
             elo_B = extract_elo_rating(player, player_vs, surface)
-        if elo_A != "" and elo_B != "":
+        if elo_A and elo_B:
             break
     return elo_A, elo_B
 

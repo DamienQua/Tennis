@@ -102,18 +102,19 @@ class TennisMatchAnalyzer:
         
         min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0
         for m_i, match in enumerate(pAB_matchs):
-            if tour_now.lower().replace(" ", "-") in match.contents[1]["href"]:
-                try:
-                    new_stats = await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
-                    min_tour += new_stats[0]
-                    if m_i == 0 and "Qualifying" not in data.text:
-                        per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
-                except:
-                    pass
-            else:
+            if tour_now.lower().replace(" ", "-") not in match.contents[1]["href"]:
                 break
+            
+            try:
+                new_stats = await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
+                min_tour += new_stats[0]
+                if m_i == 0 and "Qualifying" not in data.text:
+                    per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
+            except:
+                pass
 
         return min_tour, per_first_serve, points_first_serve, per_save_bp
+
 
     async def calculate_matches_last_month(self, today, player_id, match_id):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)

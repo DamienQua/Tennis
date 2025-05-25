@@ -27,18 +27,25 @@ class AttributeComparator:
         return (30, 0) if diff > 0 else (30, 30) if diff == 0 else (0, 30)
 
     def compare_medium_attribute(self, k):
-        diff = float(self.data[k]) - float(self.data[k + (1 if k == 6 else 11)])
-        if diff > 0:
-            return (ceil(diff / 10), 0) if k == 6 else (10, 0) if k == 14 else (0, 10)
-        elif diff < 0:
-            return (0, ceil(-diff / 10)) if k == 6 else (0, 10) if k == 14 else (10, 0)
-        return (10, 10)
+        offset = 1 if k == 6 else 11
+        diff = float(self.data[k]) - float(self.data[k + offset])
+        if diff == 0:
+            return (10, 10)
+        if k == 6:
+            return (ceil(diff / 10), 0) if diff > 0 else (0, ceil(-diff / 10))
+        if k == 14:
+            return (10, 0) if diff > 0 else (0, 10)
+        else:
+            return (0, 10) if diff > 0 else (10, 0)
 
     def compare_regular_attribute(self, k):
-        diff = float(self.data[k]) - float(self.data[k + (1 if k in (10, 12) else 11)])
+        offset = 1 if k in (10, 12) else 11
+        diff = float(self.data[k]) - float(self.data[k + offset])
         if k in (10, 12):
             return (5 * ceil(diff / 10), 0) if diff > 0 else (0, 5 * ceil(-diff / 10))
-        return (20, 0) if diff > 0 else (20, 20) if diff == 0 else (0, 20)
+        if diff == 0:
+            return (20, 20)
+        return (20, 0) if diff > 0 else (0, 20)
 
 class Match:
     def __init__(self, match_vs):

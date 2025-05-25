@@ -27,20 +27,18 @@ def extract_data(text):
 
 async def process_odds(html, match_vs, indice_tab, player_index):
     name, odds1, odds2 = extract_data(html)
-    if name and odds1 and odds2:
-        odds = [float(odds1), float(odds2)]
-        if name.find(match_vs[2].split(" ")[-1]) < name.find(match_vs[3].split(" ")[-1]):
-            match_vs[38], match_vs[39] = odds[1], odds[0]
-        else:
-            match_vs[38], match_vs[39] = odds[0], odds[1]
-        
-        if float(match_vs[38]) > float(match_vs[39]):
-            indice_tab[20], indice_tab[21] = 20, 0
-        else:
-            indice_tab[20], indice_tab[21] = 10, 10
-        
-        return True
-    return False
+    if not (name and odds1 and odds2):
+        return False
+    
+    odds = [float(odds1), float(odds2)]
+    if name.find(match_vs[2].split(" ")[-1]) < name.find(match_vs[3].split(" ")[-1]):
+        match_vs[38], match_vs[39] = odds[1], odds[0]
+    else:
+        match_vs[38], match_vs[39] = odds[0], odds[1]
+    
+    indice_tab[20], indice_tab[21] = (20, 0) if float(match_vs[38]) > float(match_vs[39]) else (10, 10)
+    
+    return True
 
 async def odds_match(match_vs, indice_tab):
     async with aiohttp.ClientSession() as session:
