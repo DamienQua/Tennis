@@ -1,3 +1,16 @@
+"""
+    A utility class for calculating and validating dates within a specific time range.
+    
+    This class provides static methods to:
+    - Calculate the number of matches within the last month
+    - Validate dates 
+    - Find and adjust date indices
+    - Check if a date is within the last month
+    
+    Methods help process date-related operations, particularly for comparing 
+    dates against a reference point (today) within a specified time window.
+"""
+
 from datetime import datetime
 
 class DateHelper:

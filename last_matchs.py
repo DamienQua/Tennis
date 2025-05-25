@@ -1,3 +1,21 @@
+"""
+Tennis match analysis module for fetching and processing player and match statistics.
+
+This module provides classes and methods to:
+- Fetch tennis match data from an admin URL
+- Parse player activity and match statistics
+- Calculate win percentages and match-related metrics
+- Analyze match details for two players
+
+Key classes:
+- TennisDataFetcher: Handles async data retrieval from a tennis statistics source
+- TennisDataParser: Parses raw match and player data
+- StatisticsProcessor: Processes match statistics
+- TennisMatchAnalyzer: Coordinates match analysis and data processing
+
+The last_matchs function serves as the main entry point for match analysis.
+"""
+
 from bs4 import BeautifulSoup
 from match_statistics_processor import MatchStatisticsProcessor
 from helpers import DateHelper

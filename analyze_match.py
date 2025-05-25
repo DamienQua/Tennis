@@ -1,3 +1,28 @@
+"""
+Analyzes a tennis match by fetching and processing various data points from an online source.
+
+This async function performs a comprehensive match analysis by:
+- Extracting player IDs and match details
+- Determining tournament and surface
+- Fetching player rankings and motivation indices
+- Generating head-to-head statistics
+- Comparing player performance
+- Processing match odds
+- Extracting Elo ratings
+- Generating a match report spreadsheet
+
+Args:
+    session: Aiohttp client session for making async HTTP requests
+    header: Request headers
+    match: URL of the match to analyze
+    tournaments: List of tournament names
+    elo: Elo ratings data
+
+Returns:
+    str: A summary of key match details including tournament, surface, players, 
+         and various performance indicators
+"""
+
 import asyncio
 from bs4 import BeautifulSoup
 import time

@@ -1,3 +1,22 @@
+"""
+Compares two players' attributes and calculates match odds.
+
+This module provides functionality to compare player attributes and determine 
+match probabilities through the following key components:
+- AttributeComparator: Calculates differences between player attributes
+- Match: Processes player comparisons and generates match odds
+- compare_players(): Main entry point for comparing two players
+
+The comparison involves analyzing various numerical attributes, applying 
+weighted comparisons, and computing final match odds with a trajectory factor.
+
+Args:
+    match_vs (list): A list containing player attributes and match-related data
+
+Returns:
+    list: Updated match data with calculated odds
+"""
+
 from math import ceil, floor
 
 class AttributeComparator:

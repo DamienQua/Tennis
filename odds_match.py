@@ -1,3 +1,22 @@
+"""
+Asynchronously fetch and process betting odds for two players from Odds Portal.
+
+This module provides functions to:
+- Fetch odds data for a player from Odds Portal website
+- Extract player name and odds from HTML content
+- Process and compare odds between two players
+- Update match and indices data based on retrieved odds
+
+The main function `odds_match` retrieves odds for two players, compares their odds,
+and updates match statistics accordingly.
+
+Functions:
+- fetch_odds: Retrieves HTML content for a player from Odds Portal
+- extract_data: Parses HTML to extract player name and odds
+- process_odds: Processes odds and updates match data
+- odds_match: Orchestrates odds retrieval and processing for a match
+"""
+
 import aiohttp
 import asyncio
 import re

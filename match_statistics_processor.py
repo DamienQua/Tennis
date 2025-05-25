@@ -1,3 +1,22 @@
+"""
+    A processor for handling and aggregating match statistics for a player.
+    
+    This class manages the retrieval and processing of match statistics across tournaments,
+    providing methods to fetch player activity, extract match-specific statistics, and 
+    aggregate key performance metrics.
+    
+    Attributes:
+        data_fetcher: A service responsible for retrieving player match data
+        stats_processor: A service for processing individual match statistics
+    
+    Methods:
+        process_match_statistics: Asynchronously retrieves and processes match statistics 
+            for a specific player and tournament
+        update_statistics: Updates aggregated statistics from individual match data
+        is_match_in_tournament: Checks if a match belongs to a specific tournament
+        get_match_statistics: Retrieves detailed statistics for a specific match
+"""
+
 class MatchStatisticsProcessor:
     def __init__(self, data_fetcher, stats_processor):
         self.data_fetcher = data_fetcher

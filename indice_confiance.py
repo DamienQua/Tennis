@@ -1,3 +1,24 @@
+"""
+Tennis data analysis module for fetching and analyzing player and match data.
+
+This module provides classes and functions for:
+- Fetching tennis-related data asynchronously
+- Analyzing player motivation based on recent match history
+- Analyzing match tactics and performance
+- Calculating confidence indices for tennis match predictions
+
+The module supports different analysis types including:
+- Motivation analysis
+- Tactics analysis 
+- Surface performance analysis
+
+Key components:
+- TennisDataFetcher: Handles asynchronous data retrieval
+- MotivationAnalyzer: Evaluates player motivation 
+- TacticsAnalyzer: Examines match statistics and tactics
+- indice_confiance: Main function coordinating different analysis types
+"""
+
 from bs4 import BeautifulSoup
 from datetime import date
 from variables import indice_tab

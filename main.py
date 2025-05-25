@@ -1,3 +1,19 @@
+"""
+A class for processing tennis match data asynchronously with configurable filtering and analysis.
+
+Handles fetching, analyzing, and processing match previews from a tennis website, with support for:
+- Rate-limited web requests
+- Match URL filtering based on year and tournament type
+- Special case handling for specific player names
+- Performance tracking and error handling
+
+Attributes:
+    session (aiohttp.ClientSession): HTTP session for web requests
+    header (dict): HTTP request headers
+    rate_limit (AsyncLimiter): Request rate limiting configuration
+    already_processed (str): Tracking of previously processed matches
+"""
+
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup

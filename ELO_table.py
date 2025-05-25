@@ -1,3 +1,21 @@
+"""
+Asynchronously fetch and parse ELO ratings from Tennis Abstract for a given gender.
+
+This function retrieves ELO ratings for male or female tennis players from the Tennis Abstract website,
+and writes the ratings to a text file while also returning them as a string.
+
+Args:
+    m_w (str): Gender specification, either 'men' or 'women'
+
+Returns:
+    str: A string containing ELO ratings for tennis players
+
+Notes:
+    - Creates a text file named '{m_w}_ELO.txt' with the parsed ratings
+    - Uses a cached HTTP request to improve performance
+    - Requires an internet connection to fetch the latest ratings
+"""
+
 import aiohttp
 from bs4 import BeautifulSoup 
 import functools

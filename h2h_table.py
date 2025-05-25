@@ -1,3 +1,18 @@
+"""
+Processes head-to-head (H2H) tennis match data and calculates statistical insights.
+
+This module provides functionality to extract and analyze historical match data between two players,
+including win percentages, surface performance, and other relevant statistics.
+
+Key components:
+- MatchContext: Stores contextual information about a specific match
+- H2HDataProcessor: Processes and calculates head-to-head match statistics
+- h2h_table: Async function to generate H2H match insights and update confidence indices
+
+The class handles parsing match details, calculating win percentages across different categories 
+(all-time, last year, surface-specific, and game-related), and supporting confidence index generation.
+"""
+
 import re
 from indice_confiance import indice_confiance
 from h2h_stats import H2HStats, DateUtils

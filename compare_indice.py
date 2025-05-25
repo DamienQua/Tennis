@@ -1,3 +1,18 @@
+"""
+Compares indices and calculates a comparative score based on specific and range-based index comparisons.
+
+This module provides functionality to:
+- Compare specific indices in a given index table
+- Compare ranges of indices 
+- Calculate a comparative score based on the comparisons
+- Determine a final index value for a specific position
+
+The main components are:
+- IndiceComparator: Handles the core comparison logic
+- calculate_indice_24: Calculates the final index based on comparison results
+- compare_indice: Top-level function to perform index comparisons
+"""
+
 from math import ceil
 
 class IndiceComparator:

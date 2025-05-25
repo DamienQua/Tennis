@@ -1,3 +1,17 @@
+"""
+    A class for analyzing match statistics in tennis.
+    
+    Provides methods to calculate serve, return, and tiebreak statistics from match data.
+    Supports processing statistics for two players with a flag-based approach to handle different perspectives.
+    
+    Methods:
+        calculate_serve_return_stats: Extracts and calculates serve and return performance percentages
+        calculate_tiebreak_stats: Computes tiebreak point win percentages from match scores
+        parse_tiebreak_scores: Identifies and counts tiebreak points from match scores
+        is_tiebreak: Determines if a given score represents a tiebreak scenario
+        update_tiebreak_counts: Updates tiebreak point counts based on score comparison
+"""
+
 import re
 
 class MatchStatisticsAnalyzer:

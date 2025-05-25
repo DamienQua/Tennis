@@ -1,3 +1,17 @@
+"""
+    Analyzes surface performance statistics for a tennis match.
+    
+    This class fetches and processes match statistics to calculate a player's performance 
+    rank based on their win percentage on a specific surface type.
+    
+    Args:
+        data_fetcher: An object responsible for fetching match data.
+        admin_url: The URL for accessing match statistics.
+    
+    Methods:
+        analyze(match_id, surface, flag): Calculates a performance rank based on surface-specific win percentages.
+"""
+
 from bs4 import BeautifulSoup
 
 class SurfacePerformanceAnalyzer:

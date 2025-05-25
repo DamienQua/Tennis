@@ -1,3 +1,20 @@
+"""
+Generate an Excel file with detailed tennis match analysis.
+
+This function creates an Excel workbook with comprehensive statistics comparing two tennis players.
+The generated file includes performance metrics such as world ranking, win percentages, 
+service statistics, and estimated match odds.
+
+Args:
+    match_vs (list): A list containing match and player statistics.
+
+Generates an Excel file in a structured directory with the match details and saves it 
+to the 'Matchs/[Year]/[Month]/[Tournament]' directory.
+
+Example:
+    await generate_match_xlsx(match_data)
+"""
+
 import os
 import openpyxl
 from openpyxl.styles import Border, Side
