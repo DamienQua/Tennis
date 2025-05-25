@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
-from datetime import datetime
 from match_statistics_processor import MatchStatisticsProcessor
+from helpers import DateHelper
 
 class TennisDataFetcher:
     def __init__(self, session, admin_url):
@@ -132,43 +132,7 @@ class TennisMatchAnalyzer:
     async def calculate_matches_last_month(self, today, player_id, match_id):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
         show_class = data.find(id="activity-table").find_all(class_="show")
-        
-        nb_match_last_month = 0
-        date_i = 1
-        one_month = 2629800
-
-        for i in range(2, len(show_class)):
-            if self.is_valid_date(show_class, i, today, date_i, one_month):
-                nb_match_last_month += 1
-            else:
-                date_i = self.update_date_index(show_class, i, date_i, nb_match_last_month)
-                if not self.is_within_last_month(show_class, date_i, today, one_month):
-                    break
-
-        return nb_match_last_month
-
-    def is_valid_date(self, show_class, i, today, date_i, one_month):
-        return show_class[i].text != "Date" and today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month
-
-    def is_within_last_month(self, show_class, date_i, today, one_month):
-        return today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month
-
-    def update_date_index(self, show_class, i, date_i, nb_match_last_month):
-        date_i = self.adjust_date_index(show_class, i, date_i, nb_match_last_month)
-        return self.find_valid_date_index(show_class, date_i)
-
-    def adjust_date_index(self, show_class, i, date_i, nb_match_last_month):
-        if nb_match_last_month != 0:
-            return date_i + nb_match_last_month + 1
-        return i + 1 if show_class[date_i].text == "Date" else date_i
-
-    def find_valid_date_index(self, show_class, date_i):
-        while True:
-            try:
-                datetime.strptime(show_class[date_i].text, "%b %d %Y")
-                return date_i
-            except ValueError:
-                date_i -= 1
+        return DateHelper.calculate_matches_last_month(show_class, today)
 
     def update_match_vs(self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag):
         offset = 14 + 11 * last_flag
