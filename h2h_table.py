@@ -1,5 +1,3 @@
-import aiohttp
-from bs4 import BeautifulSoup
 import re
 from indice_confiance import indice_confiance
 from h2h_stats import H2HStats, DateUtils
@@ -41,23 +39,31 @@ class H2HDataProcessor:
         if self.stats.h2h_nb == 0:
             self.match_vs[6:14] = [0] * 8
 
+    def _extract_match_details(self, tr):
+        """Extract details from a match row."""
+        date_ms = DateUtils.parse_date(tr.text.strip().split("\t")[0].strip())
+        surface_m = tr.text.strip().split("\n")[5].strip().split(",")[0]
+        winner = re.sub("[\(\[].*?[\)\]]", "", tr.text.strip().split("\n")[7].strip()).split("  d")[0].strip()
+        try:
+            score = re.sub("[\(\[].*?[\)\]]", "", tr.text.strip().split("\n")[9].strip()).replace("ret.", " ").replace("w/o", "").strip()
+        except:
+            score = "0-0 0-0"
+        return date_ms, surface_m, winner, score
+
+    def _update_go_flag(self, tr, surface_m, winner):
+        """Update the 'go' and 'flag' attributes if conditions are met."""
+        if self.go == "" and surface_m in tr.text:
+            self.go = tr.find_all("a")[-1]["href"]
+            self.flag = 0 if winner == self.match_vs[2] else 1
+
     def _process_h2h_matches(self):
+        """Process head-to-head matches."""
         h2h_tr = self.data.find(class_="h2h-matches").find_all("tr")[1:]
         surface = self.match_vs[1]
         for tr in h2h_tr:
-            date_ms = DateUtils.parse_date(tr.text.strip().split("\t")[0].strip())
-            surface_m = tr.text.strip().split("\n")[5].strip().split(",")[0]
-            winner = re.sub("[\(\[].*?[\)\]]", "", tr.text.strip().split("\n")[7].strip()).split("  d")[0].strip()
-            try:
-                score = re.sub("[\(\[].*?[\)\]]", "", tr.text.strip().split("\n")[9].strip()).replace("ret."," ").replace("w/o", "").strip()
-            except:
-                score = "0-0 0-0"
-
+            date_ms, surface_m, winner, score = self._extract_match_details(tr)
             self.stats.update_stats(winner, date_ms, surface_m, score, surface)
-
-            if self.go == "" and surface_m in tr.text:
-                self.go = tr.find_all("a")[-1]["href"]
-                self.flag = 0 if winner == self.match_vs[2] else 1
+            self._update_go_flag(tr, surface_m, winner)
 
     def _calculate_percentages(self):
         percentages = self.stats.calculate_percentages()

@@ -52,16 +52,15 @@ def who_is_favorite(data):
     except:
         return [0, 0]
 
+def get_player_elo(player, match_player_name, surface):
+    player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
+    if jaro.jaro_winkler_metric(match_player_name, player_vs) >= 0.9:
+        return extract_elo_rating(player, player_vs, surface)
+    return ""
+
 def find_elo_ratings(elo, match_vs, surface):
-    elo_A, elo_B = "", ""
-    for player in elo.split("\n"):
-        player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
-        if elo_A == "" and jaro.jaro_winkler_metric(match_vs[2], player_vs) >= 0.9:
-            elo_A = extract_elo_rating(player, player_vs, surface)
-        if elo_B == "" and jaro.jaro_winkler_metric(match_vs[3], player_vs) >= 0.9:
-            elo_B = extract_elo_rating(player, player_vs, surface)
-        if elo_A and elo_B:
-            break
+    elo_A = next((get_player_elo(player, match_vs[2], surface) for player in elo.split("\n") if get_player_elo(player, match_vs[2], surface)), "")
+    elo_B = next((get_player_elo(player, match_vs[3], surface) for player in elo.split("\n") if get_player_elo(player, match_vs[3], surface)), "")
     return elo_A, elo_B
 
 def extract_elo_rating(player, player_name, surface):

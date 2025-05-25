@@ -1,4 +1,3 @@
-import aiohttp
 from bs4 import BeautifulSoup
 from datetime import date
 import re
@@ -43,33 +42,46 @@ class MotivationAnalyzer:
             return "250"
 
     def count_matches(self, data):
+        def get_year_index(show_class, year):
+            for i, item in enumerate(show_class):
+                if str(year) in item.text:
+                    return i + 1
+            return -1
+
+        def count_matches_in_year(show_class, start_index):
+            count = 0
+            for i in range(start_index, len(show_class)):
+                if show_class[i].text == "Date":
+                    break
+                count += 1
+            return count
         show_class = data.find(id="activity-table").find_all(class_="show")
         year = date.today().year
-        date_i, nb_matchs = 1, -1
         try:
-            if str(year) in show_class[date_i].text:
-                date_i += 1
-            if str(year-1) in show_class[date_i].text:
-                i = date_i + 1
-            while show_class[i].text != "Date":
-                i += 1
-            while show_class[i].text != "Date":
-                nb_matchs += 1
+            start_index = get_year_index(show_class, year)
+            if start_index == -1:
+                return -1
+            return count_matches_in_year(show_class, start_index)
         except:
-            pass
-        return nb_matchs
+            return -1
 
     def calculate_motivation_index(self, cat, nb_matchs, flag):
         index = 2 * flag
-        if "250" in cat or "500" in cat:
-            if nb_matchs < 0:
-                indice_tab[index] = 0
-            elif 0 <= nb_matchs < 2:
-                indice_tab[index] = 50
-            else: 
-                indice_tab[index] = 100
-        elif "1000" in cat or "Slam" in cat:
-            indice_tab[index] = 50 if nb_matchs < 0 else 100
+        thresholds = {
+            "250": (0, 2),
+            "500": (0, 2),
+            "1000": (0, float('inf')),
+            "Slam": (0, float('inf'))
+        }
+        for key, (low, high) in thresholds.items():
+            if key in cat:
+                if nb_matchs < 0:
+                    indice_tab[index] = 0
+                elif low <= nb_matchs < high:
+                    indice_tab[index] = 50
+                else:
+                    indice_tab[index] = 100
+                break
 
     async def analyze_surface_performance(self, match_id, surface, flag):
         stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
@@ -122,16 +134,33 @@ class TacticsAnalyzer:
                                 100-return_first_serve, return_first_serve, 100-return_second_serve, return_second_serve,
                                 100-points_save_bp, points_save_bp, 100-return_save_bp, return_save_bp]
 
+    def is_tiebreak(self, score):
+        s = score.split("-")
+        return len(s) == 2 and int(s[0]) >= 6 and int(s[1]) >= 6
+
+    def update_tiebreak_counts(self, score, tie_break_j1, tie_break_j2):
+        s = score.split("-")
+        if int(s[0]) > int(s[1]):
+            tie_break_j1 += 1
+        else:
+            tie_break_j2 += 1
+        return tie_break_j1, tie_break_j2
+
+    def parse_tiebreak_scores(self, scores):
+        tie_break_j1, tie_break_j2 = 0, 0
+        for score in scores.split(" "):
+            if self.is_tiebreak(score):
+                tie_break_j1, tie_break_j2 = self.update_tiebreak_counts(score, tie_break_j1, tie_break_j2)
+        return tie_break_j1, tie_break_j2
+    
     def calculate_tiebreak_stats(self, stats_match, flag):
         scores = re.sub(r"\([^)]*\)", "", stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0].text.strip())
-        tie_break_j1, tie_break_j2 = 0, 0
-        if scores != "":
-            tie_break_j1 = sum(int(s[0]) >= 6 and int(s[1]) >= 6 and int(s[0]) > int(s[1]) for score in scores.split(" ") for s in (score.split("-"),))
-            tie_break_j2 = sum(int(s[0]) >= 6 and int(s[1]) >= 6 and int(s[0]) < int(s[1]) for score in scores.split(" ") for s in (score.split("-"),))
-        
-        if tie_break_j1 + tie_break_j2 != 0:
-            indice_tab[18] = 100*tie_break_j1/(tie_break_j1+tie_break_j2)
-            indice_tab[19] = 100*tie_break_j2/(tie_break_j1+tie_break_j2)
+        if scores:
+            tie_break_j1, tie_break_j2 = self.parse_tiebreak_scores(scores)
+            total = tie_break_j1 + tie_break_j2
+            if total > 0:
+                indice_tab[18] = 100 * tie_break_j1 / total
+                indice_tab[19] = 100 * tie_break_j2 / total
 
 async def indice_confiance(session, admin_url, player_id, match_id, surface, flag, choix, match_url=""):
     global indice_tab

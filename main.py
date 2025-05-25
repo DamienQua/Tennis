@@ -32,7 +32,7 @@ class MatchProcessor:
 
     async def process(self, match_url, tournaments, elo_data):
         if not self.should_process_match(match_url):
-            if "fruhvirtova" not in match_url and "noskova" not in match_url and "efremova" not in match_url and "andreeva" not in match_url and "krueger" not in match_url:
+            if not self.is_special_case(match_url):
                 return None
 
         start = time.perf_counter()
@@ -40,22 +40,31 @@ class MatchProcessor:
         try:
             match_info = await self.fetch_and_analyze(match_url, tournaments, elo_data)
         except aiohttp.ClientError:
-            print("Connection error, retrying...")
-            await asyncio.sleep(1)
-            return None
+            return await self.handle_connection_error()
 
+        return self.finalize_result(match_info, match_url, start)
+
+    def is_special_case(self, match_url):
+        return any(name in match_url for name in ["fruhvirtova", "noskova", "efremova", "andreeva", "krueger"])
+
+    async def handle_connection_error(self):
+        print("Connection error, retrying...")
+        await asyncio.sleep(1)
+        return None
+
+    def finalize_result(self, match_info, match_url, start):
         result = self.format_result(match_info, match_url)
         print("Match : ", result)
         print("Time elapsed : ", round(time.perf_counter() - start, 2), " sec")
         return result
 
 async def fetch_data(session, url, method='get', data=None):
-    if method == 'get':
-        async with session.get(url) as response:
-            return await response.text()
-    elif method == 'post':
-        async with session.post(url, data=data) as response:
-            return await response.text()
+    methods = {
+        'get': session.get,
+        'post': session.post
+    }
+    async with methods[method](url, data=data) as response:
+        return await response.text()
 
 def create_session_config():
     header = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
@@ -89,32 +98,41 @@ def update_match_files(m_i, matchs):
 
 async def main():
     session_config = create_session_config()
-    
-    atp_elo = await ELO_table("ATP")
-    wta_elo = await ELO_table("WTA")
-    
+    atp_elo, wta_elo = await load_elo_tables()
     already = load_reviewed_matches()
-    matchs = ""
-    matchs_tab = np.chararray(256, itemsize=100, unicode=True)
-    i = 0
 
     async with aiohttp.ClientSession(connector=session_config.connector, headers=session_config.header) as session:
         await login(session)
         tournaments, mtch = await fetch_match_previews(session)
-        
-        processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
-        
-        for m in mtch:
-            elo_data = atp_elo + '\n' + wta_elo if ("atp" in m or ("wta" not in m and "masters" in m)) else wta_elo + '\n' + atp_elo
-            m_i = await processor.process(m, tournaments, elo_data)
-            
-            if m_i:
-                matchs += m_i + "\n"
-                matchs_tab[i] = m_i
-                i += 1
-                update_match_files(m_i, matchs)
+        matchs = await process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, already)
 
     print(matchs)
+
+async def load_elo_tables():
+    atp_elo = await ELO_table("ATP")
+    wta_elo = await ELO_table("WTA")
+    return atp_elo, wta_elo
+
+async def process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, already):
+    processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
+    matchs = ""
+    matchs_tab = np.chararray(256, itemsize=100, unicode=True)
+    i = 0
+
+    for m in mtch:
+        elo_data = determine_elo_data(m, atp_elo, wta_elo)
+        m_i = await processor.process(m, tournaments, elo_data)
+        if m_i:
+            matchs += m_i + "\n"
+            matchs_tab[i] = m_i
+            i += 1
+            update_match_files(m_i, matchs)
+    return matchs
+
+def determine_elo_data(match_url, atp_elo, wta_elo):
+    if "atp" in match_url or ("wta" not in match_url and "masters" in match_url):
+        return atp_elo + '\n' + wta_elo
+    return wta_elo + '\n' + atp_elo
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -99,22 +99,34 @@ class TennisMatchAnalyzer:
     async def process_match_statistics(self, player_id, match_id, tour_now):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
         pAB_matchs = data.find_all(class_="activity-clickthroughs no-link")
-        
+
         min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0
+
         for m_i, match in enumerate(pAB_matchs):
-            if tour_now.lower().replace(" ", "-") not in match.contents[1]["href"]:
+            if not self.is_match_in_tournament(match, tour_now):
                 break
-            
-            try:
-                new_stats = await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
-                min_tour += new_stats[0]
-                if m_i == 0 and "Qualifying" not in data.text:
-                    per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
-            except:
-                pass
+            new_stats = await self.get_match_statistics(data, pAB_matchs, tour_now, m_i)
+            min_tour, per_first_serve, points_first_serve, per_save_bp = self.update_statistics(
+                new_stats, min_tour, per_first_serve, points_first_serve, per_save_bp, m_i, data
+            )
 
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
+    def update_statistics(self, new_stats, min_tour, per_first_serve, points_first_serve, per_save_bp, m_i, data):
+        if new_stats:
+            min_tour += new_stats[0]
+            if m_i == 0 and "Qualifying" not in data.text:
+                per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
+        return min_tour, per_first_serve, points_first_serve, per_save_bp
+
+    def is_match_in_tournament(self, match, tour_now):
+        return tour_now.lower().replace(" ", "-") in match.contents[1]["href"]
+
+    async def get_match_statistics(self, data, pAB_matchs, tour_now, m_i):
+        try:
+            return await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
+        except:
+            return None
 
     async def calculate_matches_last_month(self, today, player_id, match_id):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
@@ -125,30 +137,37 @@ class TennisMatchAnalyzer:
         one_month = 2629800
 
         for i in range(2, len(show_class)):
-            if show_class[i].text != "Date":
-                if today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month:
-                    nb_match_last_month += 1
+            if self.is_valid_date(show_class, i, today, date_i, one_month):
+                nb_match_last_month += 1
             else:
                 date_i = self.update_date_index(show_class, i, date_i, nb_match_last_month)
-                if today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() > one_month:
+                if not self.is_within_last_month(show_class, date_i, today, one_month):
                     break
 
         return nb_match_last_month
 
+    def is_valid_date(self, show_class, i, today, date_i, one_month):
+        return show_class[i].text != "Date" and today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month
+
+    def is_within_last_month(self, show_class, date_i, today, one_month):
+        return today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month
+
     def update_date_index(self, show_class, i, date_i, nb_match_last_month):
+        date_i = self.adjust_date_index(show_class, i, date_i, nb_match_last_month)
+        return self.find_valid_date_index(show_class, date_i)
+
+    def adjust_date_index(self, show_class, i, date_i, nb_match_last_month):
         if nb_match_last_month != 0:
-            date_i += nb_match_last_month + 1
-        else:
-            date_i = i + 1
-        if show_class[date_i].text == "Date":
-            date_i += 1
+            return date_i + nb_match_last_month + 1
+        return i + 1 if show_class[date_i].text == "Date" else date_i
+
+    def find_valid_date_index(self, show_class, date_i):
         while True:
             try:
                 datetime.strptime(show_class[date_i].text, "%b %d %Y")
-                break
+                return date_i
             except ValueError:
                 date_i -= 1
-        return date_i
 
     def update_match_vs(self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag):
         offset = 14 + 11 * last_flag
