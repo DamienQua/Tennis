@@ -1,7 +1,8 @@
 from bs4 import BeautifulSoup
 from datetime import date
-import re
 from variables import indice_tab
+from surface_performance_analyzer import SurfacePerformanceAnalyzer
+from match_statistics_analyzer import MatchStatisticsAnalyzer
 
 class TennisDataFetcher:
     def __init__(self, session):
@@ -101,13 +102,15 @@ class TacticsAnalyzer:
     def __init__(self, data_fetcher, admin_url):
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
+        self.stats_analyzer = MatchStatisticsAnalyzer() 
 
     async def analyze(self, match_url, flag):
         match_id = self.extract_match_id(match_url)
         stats_match = await self.fetch_match_stats(match_id)
-        
-        self.calculate_serve_return_stats(stats_match, flag)
-        self.calculate_tiebreak_stats(stats_match, flag)
+        serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
+        tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match, flag)
+        indice_tab[6:18] = serve_return_stats
+        indice_tab[18:20] = tiebreak_stats
 
     def extract_match_id(self, match_url):
         return match_url.split("match/")[1].split("/")[0]
@@ -115,52 +118,6 @@ class TacticsAnalyzer:
     async def fetch_match_stats(self, match_id):
         stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "showMatchStats", "matchID": match_id, "refresh": "true"})
         return BeautifulSoup(stats_match_html, "lxml")
-
-    def calculate_serve_return_stats(self, stats_match, flag):
-        j2 = 2 if flag == 1 else 0
-        points_first_serve = float(stats_match.find_all(class_="col-xs-4")[12+j2].text.strip().split("%")[0])
-        points_second_serve = float(stats_match.find_all(class_="col-xs-4")[15+j2].text.strip().split("%")[0])
-        return_first_serve = float(stats_match.find_all(class_="col-xs-4")[24+j2].text.strip().split("%")[0])
-        return_second_serve = float(stats_match.find_all(class_="col-xs-4")[27+j2].text.strip().split("%")[0])
-        points_save_bp = float(stats_match.find_all(class_="col-xs-4")[18+j2].text.strip().split("%")[0])
-        return_save_bp = float(stats_match.find_all(class_="col-xs-4")[30+j2].text.strip().split("%")[0])
-        
-        if flag == 0:
-            indice_tab[6:18] = [points_first_serve, 100-points_first_serve, points_second_serve, 100-points_second_serve,
-                                return_first_serve, 100-return_first_serve, return_second_serve, 100-return_second_serve,
-                                points_save_bp, 100-points_save_bp, return_save_bp, 100-return_save_bp]
-        else:
-            indice_tab[6:18] = [100-points_first_serve, points_first_serve, 100-points_second_serve, points_second_serve,
-                                100-return_first_serve, return_first_serve, 100-return_second_serve, return_second_serve,
-                                100-points_save_bp, points_save_bp, 100-return_save_bp, return_save_bp]
-
-    def is_tiebreak(self, score):
-        s = score.split("-")
-        return len(s) == 2 and int(s[0]) >= 6 and int(s[1]) >= 6
-
-    def update_tiebreak_counts(self, score, tie_break_j1, tie_break_j2):
-        s = score.split("-")
-        if int(s[0]) > int(s[1]):
-            tie_break_j1 += 1
-        else:
-            tie_break_j2 += 1
-        return tie_break_j1, tie_break_j2
-
-    def parse_tiebreak_scores(self, scores):
-        tie_break_j1, tie_break_j2 = 0, 0
-        for score in scores.split(" "):
-            if self.is_tiebreak(score):
-                tie_break_j1, tie_break_j2 = self.update_tiebreak_counts(score, tie_break_j1, tie_break_j2)
-        return tie_break_j1, tie_break_j2
-    
-    def calculate_tiebreak_stats(self, stats_match, flag):
-        scores = re.sub(r"\([^)]*\)", "", stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0].text.strip())
-        if scores:
-            tie_break_j1, tie_break_j2 = self.parse_tiebreak_scores(scores)
-            total = tie_break_j1 + tie_break_j2
-            if total > 0:
-                indice_tab[18] = 100 * tie_break_j1 / total
-                indice_tab[19] = 100 * tie_break_j2 / total
 
 async def indice_confiance(session, admin_url, player_id, match_id, surface, flag, choix, match_url=""):
     global indice_tab
@@ -173,3 +130,7 @@ async def indice_confiance(session, admin_url, player_id, match_id, surface, fla
     elif choix == "Tactique":
         tactics_analyzer = TacticsAnalyzer(data_fetcher, admin_url)
         await tactics_analyzer.analyze(match_url, flag)
+    
+    elif choix == "Surface":
+        surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
+        indice_tab[2*flag+1] = await surface_analyzer.analyze(match_id, surface, flag)

@@ -1,6 +1,6 @@
-import aiohttp
 from bs4 import BeautifulSoup
 from datetime import datetime
+from match_statistics_processor import MatchStatisticsProcessor
 
 class TennisDataFetcher:
     def __init__(self, session, admin_url):
@@ -65,11 +65,12 @@ class TennisMatchAnalyzer:
     def __init__(self, session, admin_url):
         self.data_fetcher = TennisDataFetcher(session, admin_url)
         self.stats_processor = StatisticsProcessor()
+        self.match_statistics_processor = MatchStatisticsProcessor(self.data_fetcher, self.stats_processor)
 
     async def analyze_match(self, today, match_vs, player_id, match_id, last_flag, favorite):
         tour_now = await self.fetch_tournament_data(match_id)
         win_percentages = await self.calculate_win_percentages(player_id, match_id)
-        match_stats = await self.process_match_statistics(player_id, match_id, tour_now)
+        match_stats = await self.match_statistics_processor.process_match_statistics(player_id, match_id, tour_now)
         nb_match_last_month = await self.calculate_matches_last_month(today, player_id, match_id)
 
         self.update_match_vs(match_vs, win_percentages, match_stats, nb_match_last_month, last_flag)
