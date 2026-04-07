@@ -73,7 +73,7 @@ async def odds_match(match_vs, indice_tab):
         
         if float(match_vs[36]) < float(match_vs[37]):
             indice_tab[22], indice_tab[23] = 40, 0
-        elif float(match_vs[37]) > float(match_vs[36]):
+        elif float(match_vs[36]) > float(match_vs[37]):
             indice_tab[22], indice_tab[23] = 0, 40
         else:
             indice_tab[22], indice_tab[23] = 20, 20

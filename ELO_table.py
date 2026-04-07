@@ -40,7 +40,7 @@ async def ELO_table(m_w):
     with open(f"{m_w}_ELO.txt", "w") as f:
         for tr in tr_elements:
             td = tr.find_all("td")
-            table = td[1].text.replace("\xa0", " ") + " " + td[9].text + " " + td[10].text + " " + td[11].text + "\n"
+            table = td[1].text.replace("\xa0", " ") + " " + td[6].text + " " + td[8].text + " " + td[10].text + "\n"
             f.write(table)
             elo += table
     

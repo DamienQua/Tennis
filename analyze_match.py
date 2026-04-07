@@ -54,7 +54,7 @@ def extract_player_ids(abc):
 def determine_tournament_and_surface(match, tournaments):
     same_tour = np.zeros(len(tournaments), float)
     for tourn in tournaments:
-        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(match.split("2025-")[1].split("/")[0], tourn.split(" (")[0].lower())
+        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(match.split("2026-")[1].split("/")[0], tourn.split(" (")[0].lower())
     tour, surface = tournaments[same_tour.argmax(0)].split(" (")[0], tournaments[same_tour.argmax(0)].split("- ")[1].split(" Court")[0]
     return tour, surface
 
@@ -91,14 +91,20 @@ def find_elo_ratings(elo, match_vs, surface):
 def extract_elo_rating(player, player_name, surface):
     err = 0
     elo = ""
-    while not elo.replace(".","").isdigit():
-        if "Hard" in surface:
-            elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+1+err]
-        elif surface == "Clay":
-            elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+2+err]
-        else:
-            elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+3+err]
-        err += 1
+    try:
+        while not elo.replace(".","").isdigit():
+            try:
+                if "Hard" in surface:
+                    elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+1+err]
+                elif surface == "Clay":
+                    elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+2+err]
+                else:
+                    elo = player.replace("-", " ").split(" ")[-2] #s[player_name.replace("-", " ").count(" ")+3+err]
+                err += 1
+            except IndexError:
+                return ""
+    except:
+        return ""
     return elo
 
 async def analyze_match(session, header, match, tournaments, elo):
