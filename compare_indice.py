@@ -43,7 +43,7 @@ class IndiceComparator:
 def calculate_indice_24(comp, match_vs):
     if match_vs[36] < match_vs[37]:
         return _calculate_indice_24_helper(comp[0], comp[2])
-    elif match_vs[37] > match_vs[36]:
+    elif match_vs[36] > match_vs[37]:
         return _calculate_indice_24_helper(comp[1], comp[2])
     else:
         return 1
