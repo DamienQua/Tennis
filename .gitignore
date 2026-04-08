@@ -4,4 +4,5 @@ Matchs.txt
 Reviewed_Matchs.txt
 *.pyc
 *.xlsx
+*.xlsm
 Matchs

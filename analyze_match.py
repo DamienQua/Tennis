@@ -79,7 +79,7 @@ def who_is_favorite(data):
 
 def get_player_elo(player, match_player_name, surface):
     player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
-    if jaro.jaro_winkler_metric(match_player_name, player_vs) >= 0.9:
+    if jaro.jaro_winkler_metric(match_player_name, player_vs) >= 0.95:
         return extract_elo_rating(player, player_vs, surface)
     return ""
 

@@ -58,7 +58,13 @@ class TennisDataFetcher:
 class TennisDataParser:
     @staticmethod
     def parse_win_percentages(data):
-        win_percentages = data.text.split("Matches")[1:3] + data.text.split("months)")[1:2] + data.text.split("2000)")[1:2]
+        text = data.text
+        tl = text.lower()
+        # Use case-insensitive position search but extract from original text to preserve "N/A"
+        def split_after(marker):
+            pos = tl.find(marker.lower())
+            return [text[pos + len(marker):]] if pos >= 0 else []
+        win_percentages = text.split("Matches")[1:3] + split_after("months)") + split_after("2000)")
         return [float(percentage.replace("N/A","0").strip().replace("\t","").split("\n\n")[1].replace("N/A","0").strip().split("%")[0]) for percentage in win_percentages]
 
     @staticmethod

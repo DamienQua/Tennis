@@ -95,6 +95,7 @@ class MotivationAnalyzer:
             "1000": (0, float('inf')),
             "Slam": (0, float('inf'))
         }
+        matched = False
         for key, (low, high) in thresholds.items():
             if key in cat:
                 if nb_matchs < 0:
@@ -103,7 +104,16 @@ class MotivationAnalyzer:
                     indice_tab[index] = 50
                 else:
                     indice_tab[index] = 100
+                matched = True
                 break
+        if not matched:
+            # Fallback for unknown categories (e.g. "WTA Ch"): same logic as 250/500
+            if nb_matchs < 0:
+                indice_tab[index] = 0
+            elif nb_matchs < 2:
+                indice_tab[index] = 50
+            else:
+                indice_tab[index] = 100
 
     async def analyze_surface_performance(self, match_id, surface, flag):
         stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
