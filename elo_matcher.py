@@ -15,11 +15,19 @@ class EloMatcher:
             return EloMatcher.extract_elo_rating(player_line, player_vs, surface)
         return ""
 
-    @staticmethod
-    def find_elo_ratings(elo_data, player_a_name, player_b_name, surface):
+    @classmethod
+    def _find_rating_for_player(cls, lines, player_name, surface):
+        for line in lines:
+            rating = cls.get_player_elo(line, player_name, surface)
+            if rating:
+                return rating
+        return ""
+
+    @classmethod
+    def find_elo_ratings(cls, elo_data, player_a_name, player_b_name, surface):
         lines = elo_data.split("\n")
-        elo_a = next((EloMatcher.get_player_elo(p, player_a_name, surface) for p in lines if EloMatcher.get_player_elo(p, player_a_name, surface)), "")
-        elo_b = next((EloMatcher.get_player_elo(p, player_b_name, surface) for p in lines if EloMatcher.get_player_elo(p, player_b_name, surface)), "")
+        elo_a = cls._find_rating_for_player(lines, player_a_name, surface)
+        elo_b = cls._find_rating_for_player(lines, player_b_name, surface)
         return elo_a, elo_b
 
     @staticmethod

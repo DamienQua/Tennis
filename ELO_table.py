@@ -20,17 +20,23 @@ import aiohttp
 from bs4 import BeautifulSoup 
 import functools
 
-_FETCH_CACHE = {}
+class EloFetcher:
+    """Fetches and caches ELO ratings HTML content."""
+    cache = {}
 
-async def fetch_data(url, user_agent):
-    if url in _FETCH_CACHE:
-        return _FETCH_CACHE[url]
-    headers = {'User-Agent': user_agent}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            content = await response.text()
-            _FETCH_CACHE[url] = content
-            return content
+    @classmethod
+    async def fetch_data(cls, url, user_agent):
+        if url in cls.cache:
+            return cls.cache[url]
+        headers = {'User-Agent': user_agent}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                content = await response.text()
+                cls.cache[url] = content
+                return content
+
+_FETCH_CACHE = EloFetcher.cache
+fetch_data = EloFetcher.fetch_data
 
 async def ELO_table(m_w):
     table = ""

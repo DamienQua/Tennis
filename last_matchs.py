@@ -62,12 +62,31 @@ class TennisDataFetcher:
 
 
     async def fetch_match_statistics(self, pAB_match):
-        stats_match_html = await self.fetch_data(self.admin_url, {"action": pAB_match.find_all("a")[1]["data-action"], "matchID": pAB_match.find_all("a")[1]["data-matchid"]})
-        return BeautifulSoup(stats_match_html, "lxml")
+        try:
+            a_tags = pAB_match.find_all("a") if pAB_match else []
+            if len(a_tags) >= 2 and a_tags[1].has_attr("data-action") and a_tags[1].has_attr("data-matchid"):
+                stats_match_html = await self.fetch_data(self.admin_url, {"action": a_tags[1]["data-action"], "matchID": a_tags[1]["data-matchid"]})
+                return BeautifulSoup(stats_match_html, "lxml")
+        except Exception:
+            pass
+        return None
 
 class TennisDataParser:
     @staticmethod
-    def parse_win_percentages(data):
+    def _extract_single_percentage(percentage_str):
+        try:
+            cleaned = percentage_str.replace("N/A", "0").strip().replace("\t", "")
+            parts = cleaned.split("\n\n")
+            target = parts[1] if len(parts) > 1 else parts[0]
+            val = target.replace("N/A", "0").strip().split("%")[0].strip()
+            return float(val) if val else 0.0
+        except Exception:
+            return 0.0
+
+    @classmethod
+    def parse_win_percentages(cls, data):
+        if not data or not getattr(data, "text", None):
+            return []
         text = data.text
         tl = text.lower()
         # Use case-insensitive position search but extract from original text to preserve "N/A"
@@ -75,15 +94,22 @@ class TennisDataParser:
             pos = tl.find(marker.lower())
             return [text[pos + len(marker):]] if pos >= 0 else []
         win_percentages = text.split("Matches")[1:3] + split_after("months)") + split_after("2000)")
-        return [float(percentage.replace("N/A","0").strip().replace("\t","").split("\n\n")[1].replace("N/A","0").strip().split("%")[0]) for percentage in win_percentages]
+        return [cls._extract_single_percentage(p) for p in win_percentages]
 
     @staticmethod
     def parse_match_statistics(stats_match):
-        min_tour = int(stats_match.find("h5").text.split(" m")[0])
-        per_first_serve = float(stats_match.find_all(class_="col-xs-4")[9].text.replace("N/A","0").strip().split("%")[0])
-        points_first_serve = float(stats_match.find_all(class_="col-xs-4")[12].text.replace("N/A","0").strip().split("%")[0])
-        per_save_bp = float(stats_match.find_all(class_="col-xs-4")[18].text.replace("N/A","0").strip().split("%")[0])
-        return min_tour, per_first_serve, points_first_serve, per_save_bp
+        if not stats_match:
+            return 0, 0, 0, 0
+        try:
+            h5 = stats_match.find("h5")
+            min_tour = int(h5.text.split(" m")[0]) if h5 and " m" in h5.text else 0
+            cols = stats_match.find_all(class_="col-xs-4")
+            per_first_serve = float(cols[9].text.replace("N/A","0").strip().split("%")[0]) if len(cols) > 9 else 0.0
+            points_first_serve = float(cols[12].text.replace("N/A","0").strip().split("%")[0]) if len(cols) > 12 else 0.0
+            per_save_bp = float(cols[18].text.replace("N/A","0").strip().split("%")[0]) if len(cols) > 18 else 0.0
+            return min_tour, per_first_serve, points_first_serve, per_save_bp
+        except Exception:
+            return 0, 0, 0, 0
 
 class StatisticsProcessor:
     @staticmethod
@@ -110,13 +136,21 @@ class TennisMatchAnalyzer:
 
         self.update_match_vs(match_vs, win_percentages, match_stats, nb_match_last_month, last_flag)
 
-        odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(player_id, match_id, 1, last_flag, favorite)
-        odds_data = odds_spread.find(class_="stats-table").find_all("tr")[2].find_all("td")[1].text.strip().split()
-        
-        odds_index = 2 if favorite[last_flag] == 1 else 0
-        odds_value = float(odds_data[odds_index])
-        
-        match_vs[42 + last_flag] = -odds_value if favorite[last_flag] == 1 else odds_value
+        try:
+            odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(player_id, match_id, 1, last_flag, favorite)
+            table = odds_spread.find(class_="stats-table")
+            if table:
+                rows = table.find_all("tr")
+                if len(rows) > 2:
+                    tds = rows[2].find_all("td")
+                    if len(tds) > 1:
+                        odds_data = tds[1].text.strip().split()
+                        odds_index = 2 if favorite[last_flag] == 1 else 0
+                        if len(odds_data) > odds_index:
+                            odds_value = float(odds_data[odds_index])
+                            match_vs[42 + last_flag] = -odds_value if favorite[last_flag] == 1 else odds_value
+        except Exception:
+            pass
 
         return match_vs
 
@@ -125,21 +159,32 @@ class TennisMatchAnalyzer:
 
     async def calculate_win_percentages(self, player_id, match_id):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
-        all_percentages = self.stats_processor.calculate_win_percentages(data)
+        raw_all = self.stats_processor.calculate_win_percentages(data)
+        all_percentages = (list(raw_all) + [0.0] * 4)[:4]
 
-        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 2)
-        surface_percentages = self.stats_processor.calculate_win_percentages(data)[2:]
+        data_surf = await self.data_fetcher.fetch_player_activity(player_id, match_id, 2)
+        raw_surf = self.stats_processor.calculate_win_percentages(data_surf)
+        surf_part = raw_surf[2:] if len(raw_surf) >= 3 else raw_surf
+        surface_percentages = (list(surf_part) + [0.0] * 2)[:2]
 
         return all_percentages + surface_percentages
 
     async def calculate_matches_last_month(self, today, player_id, match_id):
-        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
-        show_class = data.find(id="activity-table").find_all(class_="show")
-        return DateHelper.calculate_matches_last_month(show_class, today)
+        try:
+            data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
+            activity_table = data.find(id="activity-table") if data else None
+            if not activity_table:
+                return 0
+            show_class = activity_table.find_all(class_="show")
+            return DateHelper.calculate_matches_last_month(show_class, today)
+        except Exception:
+            return 0
 
     def update_match_vs(self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag):
         offset = 14 + 11 * last_flag
-        match_vs[offset:offset+11] = win_percentages + [nb_match_last_month] + list(match_stats)
+        wp = (list(win_percentages) + [0.0] * 6)[:6]
+        ms = (list(match_stats) + [0.0] * 4)[:4]
+        match_vs[offset:offset+11] = wp + [nb_match_last_month] + ms
 
 async def last_matchs(session, today, match_vs, admin_url, player_id, match_id, last_flag, favorite):
     analyzer = TennisMatchAnalyzer(session, admin_url)

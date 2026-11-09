@@ -24,7 +24,7 @@ class MatchStatisticsProcessor:
 
     async def process_match_statistics(self, player_id, match_id, tour_now):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
-        pAB_matchs = data.find_all(class_="activity-clickthroughs no-link")
+        pAB_matchs = data.find_all(class_="activity-clickthroughs no-link") if data else []
 
         min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0
 
@@ -41,7 +41,7 @@ class MatchStatisticsProcessor:
     def update_statistics(self, new_stats, min_tour, per_first_serve, points_first_serve, per_save_bp, m_i, data):
         if new_stats:
             min_tour += new_stats[0]
-            if m_i == 0 and "Qualifying" not in data.text:
+            if m_i == 0 and data and "Qualifying" not in data.text:
                 per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
