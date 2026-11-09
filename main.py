@@ -14,10 +14,14 @@ Attributes:
     already_processed (str): Tracking of previously processed matches
 """
 
+import os
+os.environ.pop('SSLKEYLOGFILE', None)
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 import time
+from datetime import datetime
+from dotenv import dotenv_values
 import numpy as np
 from ELO_table import ELO_table
 from analyze_match import analyze_match
@@ -34,7 +38,10 @@ class MatchProcessor:
         self.already_processed = already_processed
 
     def should_process_match(self, match_url):
-        return (("2026" in match_url) and 
+        current_year = str(datetime.now().year)
+        next_year = str(datetime.now().year + 1)
+        valid_year = (current_year in match_url) or (next_year in match_url)
+        return (valid_year and 
                 (any(subword in match_url for subword in ("atp", "wta", "masters"))) and 
                 not ("/q/" in match_url or "tba-tba" in match_url) and 
                 match_url not in self.already_processed)
@@ -90,13 +97,18 @@ def create_session_config():
 
 def load_reviewed_matches():
     try:
-        with open("Reviewed_Matchs.txt", "r") as f:
+        with open("Reviewed_Matchs.txt", "r", encoding="utf-8") as f:
             return f.read()
     except:
         return ""
 
 async def login(session):
-    login_data = {"log": "", "pwd": ""}
+    config = dotenv_values(".env")
+    username = config.get("TENNISINSIGHT_LOGIN")
+    password = config.get("TENNISINSIGHT_PASSWORD")
+    if not username or not password:
+        raise ValueError("Erreur: Les identifiants TENNISINSIGHT_LOGIN et TENNISINSIGHT_PASSWORD doivent être définis dans le fichier .env")
+    login_data = {"log": username, "pwd": password}
     await fetch_data(session, "https://tennisinsight.com/wp-login.php", method='post', data=login_data)
 
 async def fetch_match_previews(session):
@@ -107,9 +119,9 @@ async def fetch_match_previews(session):
     return tournaments, mtch
 
 def update_match_files(m_i, matchs):
-    with open("Reviewed_Matchs.txt", "a") as old:
+    with open("Reviewed_Matchs.txt", "a", encoding="utf-8") as old:
         old.write(m_i + "\n")
-    with open("Matchs.txt", "w") as new:
+    with open("Matchs.txt", "w", encoding="utf-8") as new:
         new.write(matchs)
 
 async def main():
@@ -132,7 +144,7 @@ async def load_elo_tables():
 async def process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, already):
     processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
     matchs = ""
-    matchs_tab = np.chararray(256, itemsize=100, unicode=True)
+    matchs_tab = np.empty(256, dtype="<U100")
     i = 0
 
     for m in mtch:

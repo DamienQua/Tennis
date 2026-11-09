@@ -50,9 +50,10 @@ class DateHelper:
 
     @staticmethod
     def find_valid_date_index(show_class, date_i):
-        while True:
+        while date_i >= 0:
             try:
                 datetime.strptime(show_class[date_i].text, "%b %d %Y")
                 return date_i
-            except ValueError:
+            except (ValueError, IndexError):
                 date_i -= 1
+        return 0

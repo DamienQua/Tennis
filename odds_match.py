@@ -17,6 +17,8 @@ Functions:
 - odds_match: Orchestrates odds retrieval and processing for a match
 """
 
+import os
+os.environ.pop('SSLKEYLOGFILE', None)
 import aiohttp
 import asyncio
 import re
@@ -39,10 +41,32 @@ async def fetch_odds(session, player):
     raise Exception(f"Unable to load page for {player} after {max_retries} attempts")
 
 def extract_data(text):
-    match_name = re.search(r'&quot;name&quot;:&quot;(.*?)&quot;', text)
-    name = match_name.group(1) if match_name else None
-    odds = re.findall(r'&quot;avgOdds&quot;:([\d.]+)', text)
-    return name, odds[0] if len(odds) > 0 else None, odds[1] if len(odds) > 1 else None
+    # 1. Extraction des noms de match / joueurs
+    home = re.search(r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
+    away = re.search(r'(?:&quot;|\\")away-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
+    if home and away:
+        name = f"{home.group(1)} - {away.group(1)}"
+    else:
+        match_name = re.search(r'(?:&quot;|\\")name(?:&quot;|\\"):(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")', text)
+        if match_name:
+            name = match_name.group(1)
+        else:
+            html_players = re.findall(r'<p class="order-[12][^"]*">([^<]+)</p>', text)
+            if len(html_players) >= 2:
+                name = f"{html_players[0]} - {html_players[1]}"
+            else:
+                name = None
+
+    # 2. Extraction des cotes (priorité aux maxOdds: ex 1.48 et 2.75)
+    odds = re.findall(r'(?:&quot;|\\")maxOdds(?:&quot;|\\"):([\d.]+)', text)
+    if not odds:
+        odds = re.findall(r'class="font-primary font-bold">([\d.]+)</p>', text)
+    if not odds:
+        odds = re.findall(r'(?:&quot;|\\")avgOdds(?:&quot;|\\"):([\d.]+)', text)
+
+    odds1 = odds[0] if len(odds) > 0 else None
+    odds2 = odds[1] if len(odds) > 1 else None
+    return name, odds1, odds2
 
 async def process_odds(html, match_vs, indice_tab, player_index):
     name, odds1, odds2 = extract_data(html)
@@ -50,32 +74,48 @@ async def process_odds(html, match_vs, indice_tab, player_index):
         return False
     
     odds = [float(odds1), float(odds2)]
-    if name.find(match_vs[2].split(" ")[-1]) < name.find(match_vs[3].split(" ")[-1]):
-        match_vs[38], match_vs[39] = odds[1], odds[0]
-    else:
+    p1 = match_vs[2].split(" ")[-1].lower()
+    p2 = match_vs[3].split(" ")[-1].lower()
+    p1_pos = name.lower().find(p1)
+    p2_pos = name.lower().find(p2)
+
+    # Attribution de la cote en fonction du joueur
+    if p1_pos != -1 and (p2_pos == -1 or p1_pos < p2_pos):
         match_vs[38], match_vs[39] = odds[0], odds[1]
+    else:
+        match_vs[38], match_vs[39] = odds[1], odds[0]
     
-    indice_tab[20], indice_tab[21] = (20, 0) if float(match_vs[38]) > float(match_vs[39]) else (10, 10)
+    if float(match_vs[38]) < float(match_vs[39]):
+        indice_tab[20], indice_tab[21] = 20, 0
+    elif float(match_vs[38]) > float(match_vs[39]):
+        indice_tab[20], indice_tab[21] = 0, 20
+    else:
+        indice_tab[20], indice_tab[21] = 10, 10
     
     return True
 
-async def odds_match(match_vs, indice_tab):
-    async with aiohttp.ClientSession() as session:
-        player1, player2 = match_vs[2].split(" ")[-1], match_vs[3].split(" ")[-1]
-        html1, html2 = await asyncio.gather(
-            fetch_odds(session, player1),
-            fetch_odds(session, player2)
-        )
-        
-        success = await process_odds(html1, match_vs, indice_tab, 2)
-        if not success:
-            success = await process_odds(html2, match_vs, indice_tab, 3)
-        
-        if float(match_vs[36]) < float(match_vs[37]):
-            indice_tab[22], indice_tab[23] = 40, 0
-        elif float(match_vs[36]) > float(match_vs[37]):
-            indice_tab[22], indice_tab[23] = 0, 40
-        else:
-            indice_tab[22], indice_tab[23] = 20, 20
+async def _odds_match_impl(session, match_vs, indice_tab):
+    player1, player2 = match_vs[2].split(" ")[-1], match_vs[3].split(" ")[-1]
+    html1, html2 = await asyncio.gather(
+        fetch_odds(session, player1),
+        fetch_odds(session, player2)
+    )
+    
+    success = await process_odds(html1, match_vs, indice_tab, 2)
+    if not success:
+        success = await process_odds(html2, match_vs, indice_tab, 3)
+    
+    if float(match_vs[36]) < float(match_vs[37]):
+        indice_tab[22], indice_tab[23] = 40, 0
+    elif float(match_vs[36]) > float(match_vs[37]):
+        indice_tab[22], indice_tab[23] = 0, 40
+    else:
+        indice_tab[22], indice_tab[23] = 20, 20
 
     return match_vs, indice_tab
+
+async def odds_match(match_vs, indice_tab, session=None):
+    if session is not None:
+        return await _odds_match_impl(session, match_vs, indice_tab)
+    async with aiohttp.ClientSession() as new_session:
+        return await _odds_match_impl(new_session, match_vs, indice_tab)

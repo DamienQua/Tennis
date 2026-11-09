@@ -79,11 +79,13 @@ class Match:
         return self.data
 
     def compare_attributes(self):
-        for k in [4, 8, 19] + list(range(6, 25)):
-            if k not in (4, 8, 19):
-                comp_a, comp_b = self.attribute_comparator.compare(k)
-                self.comp[0] += comp_a
-                self.comp[1] += comp_b
+        # Attributes to compare: 4 (ranking), 8 (H2H 1y), 19 (career surface %),
+        # and attributes in range(6, 25)
+        attributes_to_compare = [4] + list(range(6, 25))
+        for k in attributes_to_compare:
+            comp_a, comp_b = self.attribute_comparator.compare(k)
+            self.comp[0] += comp_a
+            self.comp[1] += comp_b
 
     def add_odds_spread(self):
         self.comp[0] += float(self.data[42]) * 5

@@ -20,12 +20,17 @@ import aiohttp
 from bs4 import BeautifulSoup 
 import functools
 
-@functools.lru_cache(maxsize=None)
+_FETCH_CACHE = {}
+
 async def fetch_data(url, user_agent):
+    if url in _FETCH_CACHE:
+        return _FETCH_CACHE[url]
     headers = {'User-Agent': user_agent}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
-            return await response.text()
+            content = await response.text()
+            _FETCH_CACHE[url] = content
+            return content
 
 async def ELO_table(m_w):
     table = ""
@@ -37,7 +42,7 @@ async def ELO_table(m_w):
     soup = BeautifulSoup(content, 'lxml')
     tr_elements = soup.find_all("tr")[3:]
 
-    with open(f"{m_w}_ELO.txt", "w") as f:
+    with open(f"{m_w}_ELO.txt", "w", encoding="utf-8") as f:
         for tr in tr_elements:
             td = tr.find_all("td")
             table = td[1].text.replace("\xa0", " ") + " " + td[6].text + " " + td[8].text + " " + td[10].text + "\n"

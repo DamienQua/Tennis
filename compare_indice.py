@@ -49,6 +49,8 @@ def calculate_indice_24(comp, match_vs):
         return 1
 
 def _calculate_indice_24_helper(comp_value, comp_total):
+    if comp_total <= 0:
+        return 1
     ratio = comp_value / comp_total
     if 0 <= ratio < 0.25:
         return 0.5

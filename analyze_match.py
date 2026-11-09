@@ -24,6 +24,7 @@ Returns:
 """
 
 import asyncio
+import re
 from bs4 import BeautifulSoup
 import time
 import numpy as np
@@ -36,7 +37,6 @@ from odds_match import odds_match
 from indice_confiance import indice_confiance
 from compare_indice import compare_indice
 from generate_match_xlsx import generate_match_xlsx
-from variables import indice_tab
 
 async def fetch_data(session, url, method='get', data=None):
     if method == 'get':
@@ -51,10 +51,18 @@ def extract_player_ids(abc):
     pB_id = abc.split("?playerid=")[2].split('"')[0]
     return pA_id, pB_id
 
+def extract_tournament_slug(match_url):
+    found = re.search(r'/\d{4}-([^/]+)/', match_url)
+    if found:
+        return found.group(1)
+    parts = [p for p in match_url.split("/") if p]
+    return parts[-2] if len(parts) >= 2 else match_url
+
 def determine_tournament_and_surface(match, tournaments):
+    slug = extract_tournament_slug(match)
     same_tour = np.zeros(len(tournaments), float)
     for tourn in tournaments:
-        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(match.split("2026-")[1].split("/")[0], tourn.split(" (")[0].lower())
+        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(slug, tourn.split(" (")[0].lower())
     tour, surface = tournaments[same_tour.argmax(0)].split(" (")[0], tournaments[same_tour.argmax(0)].split("- ")[1].split(" Court")[0]
     return tour, surface
 
@@ -108,9 +116,9 @@ def extract_elo_rating(player, player_name, surface):
     return elo
 
 async def analyze_match(session, header, match, tournaments, elo):
-    global indice_tab
     today = time.time()
-    match_vs = np.chararray(44, itemsize=100, unicode=True)
+    indice_tab = np.zeros(25)
+    match_vs = np.full(44, "", dtype="<U100")
     admin_url = "https://tennisinsight.com/wp-admin/admin-ajax.php"
 
     abc = await fetch_data(session, match)
@@ -132,19 +140,20 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     favorite = who_is_favorite(data)
 
-    tasks = [
-        indice_confiance(session, admin_url, pA_id, match_id, surface, 0, "Motivation"),
-        indice_confiance(session, admin_url, pB_id, match_id, surface, 1, "Motivation"),
-        h2h_table(data, match_vs, session, MatchContext(surface, admin_url, header, match_id)),
+    # Phase 1: Motivation & surface performance (fills indice_tab[0:4]), plus recent match histories
+    await asyncio.gather(
+        indice_confiance(session, admin_url, pA_id, match_id, surface, 0, "Motivation", indice_tab=indice_tab),
+        indice_confiance(session, admin_url, pB_id, match_id, surface, 1, "Motivation", indice_tab=indice_tab),
         last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0, favorite),
         last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1, favorite)
-    ]
+    )
 
-    await asyncio.gather(*tasks)
+    # Phase 2: Head-to-Head table (safely uses indice_tab[1] and indice_tab[3] computed in Phase 1)
+    await h2h_table(data, match_vs, session, MatchContext(surface, admin_url, header, match_id), indice_tab=indice_tab)
             
     compare_players(match_vs)
 
-    match_vs, indice_tab = await odds_match(match_vs, indice_tab)
+    match_vs, indice_tab = await odds_match(match_vs, indice_tab, session=session)
 
     compare_indice(indice_tab, match_vs)
 

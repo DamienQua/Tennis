@@ -38,9 +38,11 @@ class TennisDataFetcher:
                 return await response.text()
 
 class MotivationAnalyzer:
-    def __init__(self, data_fetcher, admin_url):
+    def __init__(self, data_fetcher, admin_url, indice_tab):
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
+        self.indice_tab = indice_tab
+        self.surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
 
     async def analyze(self, player_id, match_id, surface, flag):
         data_html = await self.fetch_player_activity(player_id, match_id)
@@ -99,40 +101,30 @@ class MotivationAnalyzer:
         for key, (low, high) in thresholds.items():
             if key in cat:
                 if nb_matchs < 0:
-                    indice_tab[index] = 0
+                    self.indice_tab[index] = 0
                 elif low <= nb_matchs < high:
-                    indice_tab[index] = 50
+                    self.indice_tab[index] = 50
                 else:
-                    indice_tab[index] = 100
+                    self.indice_tab[index] = 100
                 matched = True
                 break
         if not matched:
             # Fallback for unknown categories (e.g. "WTA Ch"): same logic as 250/500
             if nb_matchs < 0:
-                indice_tab[index] = 0
+                self.indice_tab[index] = 0
             elif nb_matchs < 2:
-                indice_tab[index] = 50
+                self.indice_tab[index] = 50
             else:
-                indice_tab[index] = 100
+                self.indice_tab[index] = 100
 
     async def analyze_surface_performance(self, match_id, surface, flag):
-        stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
-        data = BeautifulSoup(stats_html, "lxml")
-        i = 1 if flag == 0 else 4
-        
-        surface_indices = {"Hard": 12, "Indoor Hard": 19, "Carpet": 26, "Clay": 33, "Grass": 40}
-        win_sur = float(data.find_all(class_="table match-preview-statistics-table")[i].find_all("td")[surface_indices[surface]].text.replace("%","").replace("N/A","0"))
-        
-        rank = 10
-        for j in range(12, 41, 7):
-            if win_sur > float(data.find_all(class_="table match-preview-statistics-table")[i].find_all("td")[j].text.replace("%","").replace("N/A","0")):
-                rank += 10
-        indice_tab[2*flag+1] = rank
+        self.indice_tab[2*flag+1] = await self.surface_analyzer.analyze(match_id, surface, flag)
 
 class TacticsAnalyzer:
-    def __init__(self, data_fetcher, admin_url):
+    def __init__(self, data_fetcher, admin_url, indice_tab):
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
+        self.indice_tab = indice_tab
         self.stats_analyzer = MatchStatisticsAnalyzer() 
 
     async def analyze(self, match_url, flag):
@@ -140,8 +132,8 @@ class TacticsAnalyzer:
         stats_match = await self.fetch_match_stats(match_id)
         serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
         tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match, flag)
-        indice_tab[6:18] = serve_return_stats
-        indice_tab[18:20] = tiebreak_stats
+        self.indice_tab[6:18] = serve_return_stats
+        self.indice_tab[18:20] = tiebreak_stats
 
     def extract_match_id(self, match_url):
         return match_url.split("match/")[1].split("/")[0]
@@ -150,18 +142,21 @@ class TacticsAnalyzer:
         stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "showMatchStats", "matchID": match_id, "refresh": "true"})
         return BeautifulSoup(stats_match_html, "lxml")
 
-async def indice_confiance(session, admin_url, player_id, match_id, surface, flag, choix, match_url=""):
-    global indice_tab
+async def indice_confiance(session, admin_url, player_id, match_id, surface, flag, choix, match_url="", indice_tab=None):
+    if indice_tab is None:
+        from variables import indice_tab as default_tab
+        indice_tab = default_tab
     data_fetcher = TennisDataFetcher(session)
 
     if choix == "Motivation":
-        motivation_analyzer = MotivationAnalyzer(data_fetcher, admin_url)
+        motivation_analyzer = MotivationAnalyzer(data_fetcher, admin_url, indice_tab)
         await motivation_analyzer.analyze(player_id, match_id, surface, flag)
     
     elif choix == "Tactique":
-        tactics_analyzer = TacticsAnalyzer(data_fetcher, admin_url)
+        tactics_analyzer = TacticsAnalyzer(data_fetcher, admin_url, indice_tab)
         await tactics_analyzer.analyze(match_url, flag)
     
     elif choix == "Surface":
         surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
         indice_tab[2*flag+1] = await surface_analyzer.analyze(match_id, surface, flag)
+    return indice_tab

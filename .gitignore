@@ -6,3 +6,4 @@ Reviewed_Matchs.txt
 *.xlsx
 *.xlsm
 Matchs
+.env
