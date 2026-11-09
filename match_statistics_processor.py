@@ -46,7 +46,12 @@ class MatchStatisticsProcessor:
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
     def is_match_in_tournament(self, match, tour_now):
-        return tour_now.lower().replace(" ", "-") in match.contents[1]["href"]
+        if not tour_now or not getattr(match, "contents", None) or len(match.contents) < 2:
+            return False
+        href = match.contents[1].get("href", "") if hasattr(match.contents[1], "get") else ""
+        clean_tour = tour_now.lower().replace(" ", "-")
+        first_token = clean_tour.split("-")[0]
+        return clean_tour in href or (len(first_token) >= 4 and first_token in href)
 
     async def get_match_statistics(self, data, pAB_matchs, tour_now, m_i):
         try:

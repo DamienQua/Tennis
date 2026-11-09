@@ -37,14 +37,21 @@ class MatchProcessor:
         self.rate_limit = rate_limit
         self.already_processed = already_processed
 
+    def _is_valid_season(self, match_url):
+        year = str(datetime.now().year)
+        return year in match_url or str(int(year) + 1) in match_url
+
+    def _is_valid_circuit(self, match_url):
+        return any(sub in match_url for sub in ("atp", "wta", "masters"))
+
     def should_process_match(self, match_url):
-        current_year = str(datetime.now().year)
-        next_year = str(datetime.now().year + 1)
-        valid_year = (current_year in match_url) or (next_year in match_url)
-        return (valid_year and 
-                (any(subword in match_url for subword in ("atp", "wta", "masters"))) and 
-                not ("/q/" in match_url or "tba-tba" in match_url) and 
-                match_url not in self.already_processed)
+        if not self._is_valid_season(match_url):
+            return False
+        if not self._is_valid_circuit(match_url):
+            return False
+        if "/q/" in match_url or "tba-tba" in match_url:
+            return False
+        return match_url not in self.already_processed
 
     async def fetch_and_analyze(self, match_url, tournaments, elo_data):
         async with self.rate_limit:

@@ -40,33 +40,51 @@ async def fetch_odds(session, player):
     
     raise Exception(f"Unable to load page for {player} after {max_retries} attempts")
 
-def extract_data(text):
-    # 1. Extraction des noms de match / joueurs
+def _extract_match_name(text):
     home = re.search(r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
     away = re.search(r'(?:&quot;|\\")away-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
     if home and away:
-        name = f"{home.group(1)} - {away.group(1)}"
-    else:
-        match_name = re.search(r'(?:&quot;|\\")name(?:&quot;|\\"):(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")', text)
-        if match_name:
-            name = match_name.group(1)
-        else:
-            html_players = re.findall(r'<p class="order-[12][^"]*">([^<]+)</p>', text)
-            if len(html_players) >= 2:
-                name = f"{html_players[0]} - {html_players[1]}"
-            else:
-                name = None
+        return f"{home.group(1)} - {away.group(1)}"
+    
+    match_name = re.search(r'(?:&quot;|\\")name(?:&quot;|\\"):(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")', text)
+    if match_name:
+        return match_name.group(1)
+        
+    html_players = re.findall(r'<p class="order-[12][^"]*">([^<]+)</p>', text)
+    return f"{html_players[0]} - {html_players[1]}" if len(html_players) >= 2 else None
 
-    # 2. Extraction des cotes (priorité aux maxOdds: ex 1.48 et 2.75)
+def _extract_odds_values(text):
     odds = re.findall(r'(?:&quot;|\\")maxOdds(?:&quot;|\\"):([\d.]+)', text)
     if not odds:
         odds = re.findall(r'class="font-primary font-bold">([\d.]+)</p>', text)
     if not odds:
         odds = re.findall(r'(?:&quot;|\\")avgOdds(?:&quot;|\\"):([\d.]+)', text)
+    return (odds[0], odds[1]) if len(odds) >= 2 else (None, None)
 
-    odds1 = odds[0] if len(odds) > 0 else None
-    odds2 = odds[1] if len(odds) > 1 else None
+def extract_data(text):
+    name = _extract_match_name(text)
+    odds1, odds2 = _extract_odds_values(text)
     return name, odds1, odds2
+
+def _assign_player_odds(name, odds, match_vs):
+    p1 = match_vs[2].split(" ")[-1].lower()
+    p2 = match_vs[3].split(" ")[-1].lower()
+    p1_pos = name.lower().find(p1)
+    p2_pos = name.lower().find(p2)
+
+    if p1_pos != -1 and (p2_pos == -1 or p1_pos < p2_pos):
+        match_vs[38], match_vs[39] = odds[0], odds[1]
+    else:
+        match_vs[38], match_vs[39] = odds[1], odds[0]
+
+def _update_odds_indices(match_vs, indice_tab):
+    o1, o2 = float(match_vs[38]), float(match_vs[39])
+    if o1 < o2:
+        indice_tab[20], indice_tab[21] = 20, 0
+    elif o1 > o2:
+        indice_tab[20], indice_tab[21] = 0, 20
+    else:
+        indice_tab[20], indice_tab[21] = 10, 10
 
 async def process_odds(html, match_vs, indice_tab, player_index):
     name, odds1, odds2 = extract_data(html)
@@ -74,24 +92,8 @@ async def process_odds(html, match_vs, indice_tab, player_index):
         return False
     
     odds = [float(odds1), float(odds2)]
-    p1 = match_vs[2].split(" ")[-1].lower()
-    p2 = match_vs[3].split(" ")[-1].lower()
-    p1_pos = name.lower().find(p1)
-    p2_pos = name.lower().find(p2)
-
-    # Attribution de la cote en fonction du joueur
-    if p1_pos != -1 and (p2_pos == -1 or p1_pos < p2_pos):
-        match_vs[38], match_vs[39] = odds[0], odds[1]
-    else:
-        match_vs[38], match_vs[39] = odds[1], odds[0]
-    
-    if float(match_vs[38]) < float(match_vs[39]):
-        indice_tab[20], indice_tab[21] = 20, 0
-    elif float(match_vs[38]) > float(match_vs[39]):
-        indice_tab[20], indice_tab[21] = 0, 20
-    else:
-        indice_tab[20], indice_tab[21] = 10, 10
-    
+    _assign_player_odds(name, odds, match_vs)
+    _update_odds_indices(match_vs, indice_tab)
     return True
 
 async def _odds_match_impl(session, match_vs, indice_tab):

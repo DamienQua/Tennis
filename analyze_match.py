@@ -51,6 +51,57 @@ def extract_player_ids(abc):
     pB_id = abc.split("?playerid=")[2].split('"')[0]
     return pA_id, pB_id
 
+def clean_player_name(name):
+    cleaned = re.sub(r'^\s*[\(\[][A-Za-z0-9/]+[\)\]]\s*', '', name.strip())
+    cleaned = cleaned.replace("-Vinolas", "").replace(" Vitus Nodskov", "").strip()
+    return cleaned
+
+def _names_from_title(soup_abc):
+    titles = soup_abc.find_all(class_="profile-title")
+    if len(titles) >= 2:
+        pA = clean_player_name(titles[0].text)
+        pB = clean_player_name(titles[1].text)
+        if pA and pB:
+            return pA, pB
+    return None
+
+def _names_from_links(soup_abc):
+    players = []
+    seen_ids = set()
+    for a in soup_abc.find_all('a', href=re.compile(r'/player/\?playerid=\d+')):
+        pid = a.get('href', '').split('playerid=')[-1]
+        text = a.text.strip()
+        if pid not in seen_ids and text and 'General Comments' not in text:
+            seen_ids.add(pid)
+            players.append(clean_player_name(text))
+    return (players[0], players[1]) if len(players) >= 2 else None
+
+def _names_from_overview(data_text):
+    for_parts = data_text.split("for ")
+    if len(for_parts) >= 3:
+        pA = clean_player_name(for_parts[1].split("\n")[0])
+        pB = clean_player_name(for_parts[2].split("\n")[0])
+        if pA and pB:
+            return pA, pB
+    return None
+
+def _names_from_slug(match_url):
+    parts = [p for p in match_url.split('/') if p]
+    match_slug = parts[-1] if parts else ""
+    if '-vs-' in match_slug:
+        p1_slug, p2_slug = match_slug.split('-vs-')[:2]
+        return p1_slug.replace('-', ' ').title(), p2_slug.replace('-', ' ').title()
+    return None
+
+def extract_player_names(soup_abc, match_url, data_text=""):
+    return (
+        _names_from_title(soup_abc)
+        or _names_from_links(soup_abc)
+        or _names_from_overview(data_text)
+        or _names_from_slug(match_url)
+        or ("Player A", "Player B")
+    )
+
 def extract_tournament_slug(match_url):
     found = re.search(r'/\d{4}-([^/]+)/', match_url)
     if found:
@@ -97,23 +148,20 @@ def find_elo_ratings(elo, match_vs, surface):
     return elo_A, elo_B
 
 def extract_elo_rating(player, player_name, surface):
-    err = 0
-    elo = ""
-    try:
-        while not elo.replace(".","").isdigit():
-            try:
-                if "Hard" in surface:
-                    elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+1+err]
-                elif surface == "Clay":
-                    elo = player.replace("-", " ").split(" ")[player_name.replace("-", " ").count(" ")+2+err]
-                else:
-                    elo = player.replace("-", " ").split(" ")[-2] #s[player_name.replace("-", " ").count(" ")+3+err]
-                err += 1
-            except IndexError:
-                return ""
-    except:
+    tokens = player.replace("-", " ").split()
+    if not tokens:
         return ""
-    return elo
+    if "Hard" not in surface and surface != "Clay":
+        return tokens[-2] if len(tokens) >= 2 else ""
+
+    offset = 1 if "Hard" in surface else 2
+    base_idx = player_name.replace("-", " ").count(" ") + offset
+
+    for idx in range(base_idx, len(tokens)):
+        candidate = tokens[idx]
+        if candidate.replace(".", "", 1).isdigit():
+            return candidate
+    return ""
 
 async def analyze_match(session, header, match, tournaments, elo):
     today = time.time()
@@ -122,6 +170,7 @@ async def analyze_match(session, header, match, tournaments, elo):
     admin_url = "https://tennisinsight.com/wp-admin/admin-ajax.php"
 
     abc = await fetch_data(session, match)
+    soup_abc = BeautifulSoup(abc, "lxml")
     pA_id, pB_id = extract_player_ids(abc)
     match_id = match.split("match/")[1].split("/")[0]
 
@@ -132,8 +181,8 @@ async def analyze_match(session, header, match, tournaments, elo):
     match_vs[0] = tour
     match_vs[1] = surface
 
-    for i in range(1, 3):
-        match_vs[i+1] = data.text.split("for ")[i].split("\n")[0].replace("-Vinolas","").replace(" Vitus Nodskov", "")
+    pA, pB = extract_player_names(soup_abc, match, data.text)
+    match_vs[2], match_vs[3] = pA, pB
 
     rankings = parse_player_rankings(data)
     match_vs[4], match_vs[5] = rankings[0], rankings[1]

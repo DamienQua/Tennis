@@ -29,9 +29,19 @@ class TennisDataFetcher:
         async with self.session.post(url, data=data) as response:
             return await response.text()
 
-    async def fetch_tournament_data(self, match_id):
-        tour_now_html = await self.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id})
-        return BeautifulSoup(tour_now_html, "lxml").find(id="basic-this-tournament-A")["value"].split("At ")[1]
+    async def fetch_tournament_data(self, match_id, default_tour=""):
+        try:
+            tour_now_html = await self.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id})
+            soup = BeautifulSoup(tour_now_html, "lxml")
+            for elem_id in ("basic-this-tournament-A", "basic-this-tournament-B"):
+                elem = soup.find(id=elem_id)
+                if elem and elem.get("value") and "At " in elem["value"]:
+                    parts = elem["value"].split("At ")
+                    if len(parts) > 1 and parts[1].strip():
+                        return parts[1].strip()
+        except Exception:
+            pass
+        return default_tour or ""
 
     async def fetch_player_activity(self, player_id, match_id, activity_option, odds_option = "0"):
         pAB_param = {
@@ -92,7 +102,8 @@ class TennisMatchAnalyzer:
         self.match_statistics_processor = MatchStatisticsProcessor(self.data_fetcher, self.stats_processor)
 
     async def analyze_match(self, today, match_vs, player_id, match_id, last_flag, favorite):
-        tour_now = await self.fetch_tournament_data(match_id)
+        default_tour = match_vs[0] if len(match_vs) > 0 and match_vs[0] else ""
+        tour_now = await self.fetch_tournament_data(match_id, default_tour=default_tour)
         win_percentages = await self.calculate_win_percentages(player_id, match_id)
         match_stats = await self.match_statistics_processor.process_match_statistics(player_id, match_id, tour_now)
         nb_match_last_month = await self.calculate_matches_last_month(today, player_id, match_id)
@@ -109,8 +120,8 @@ class TennisMatchAnalyzer:
 
         return match_vs
 
-    async def fetch_tournament_data(self, match_id):
-        return await self.data_fetcher.fetch_tournament_data(match_id)
+    async def fetch_tournament_data(self, match_id, default_tour=""):
+        return await self.data_fetcher.fetch_tournament_data(match_id, default_tour=default_tour)
 
     async def calculate_win_percentages(self, player_id, match_id):
         data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
