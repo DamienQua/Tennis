@@ -27,31 +27,21 @@ from ELO_table import ELO_table
 from analyze_match import analyze_match
 from aiolimiter import AsyncLimiter
 from collections import namedtuple
+from match_filter import MatchFilter
+from match_repository import MatchRepository
 
 SessionConfig = namedtuple('SessionConfig', ['header', 'connector', 'rate_limit'])
 
 class MatchProcessor:
-    def __init__(self, session, header, rate_limit, already_processed):
+    def __init__(self, session, header, rate_limit, already_processed, match_filter=None):
         self.session = session
         self.header = header
         self.rate_limit = rate_limit
         self.already_processed = already_processed
+        self.filter = match_filter or MatchFilter()
 
-    def _is_valid_season(self, match_url):
-        year = str(datetime.now().year)
-        return year in match_url or str(int(year) + 1) in match_url
-
-    def _is_valid_circuit(self, match_url):
-        return any(sub in match_url for sub in ("atp", "wta", "masters"))
-
-    def should_process_match(self, match_url):
-        if not self._is_valid_season(match_url):
-            return False
-        if not self._is_valid_circuit(match_url):
-            return False
-        if "/q/" in match_url or "tba-tba" in match_url:
-            return False
-        return match_url not in self.already_processed
+    def should_process(self, match_url):
+        return self.filter.should_process(match_url, self.already_processed)
 
     async def fetch_and_analyze(self, match_url, tournaments, elo_data):
         async with self.rate_limit:
@@ -61,9 +51,8 @@ class MatchProcessor:
         return f"{match_info}, {match_url}"
 
     async def process(self, match_url, tournaments, elo_data):
-        if not self.should_process_match(match_url):
-            if not self.is_special_case(match_url):
-                return None
+        if not self.should_process(match_url):
+            return None
 
         start = time.perf_counter()
 
@@ -73,9 +62,6 @@ class MatchProcessor:
             return await self.handle_connection_error()
 
         return self.finalize_result(match_info, match_url, start)
-
-    def is_special_case(self, match_url):
-        return any(name in match_url for name in ["fruhvirtova", "noskova", "efremova", "andreeva", "krueger"])
 
     async def handle_connection_error(self):
         print("Connection error, retrying...")
@@ -102,13 +88,6 @@ def create_session_config():
     rate_limit = AsyncLimiter(10, 1)  # 10 requests per second
     return SessionConfig(header, conn, rate_limit)
 
-def load_reviewed_matches():
-    try:
-        with open("Reviewed_Matchs.txt", "r", encoding="utf-8") as f:
-            return f.read()
-    except:
-        return ""
-
 async def login(session):
     config = dotenv_values(".env")
     username = config.get("TENNISINSIGHT_LOGIN")
@@ -125,21 +104,15 @@ async def fetch_match_previews(session):
     mtch = [m.a["href"] for m in mtch_previews.find_all(class_="match-row-link")]
     return tournaments, mtch
 
-def update_match_files(m_i, matchs):
-    with open("Reviewed_Matchs.txt", "a", encoding="utf-8") as old:
-        old.write(m_i + "\n")
-    with open("Matchs.txt", "w", encoding="utf-8") as new:
-        new.write(matchs)
-
 async def main():
     session_config = create_session_config()
+    repository = MatchRepository()
     atp_elo, wta_elo = await load_elo_tables()
-    already = load_reviewed_matches()
 
     async with aiohttp.ClientSession(connector=session_config.connector, headers=session_config.header) as session:
         await login(session)
         tournaments, mtch = await fetch_match_previews(session)
-        matchs = await process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, already)
+        matchs = await process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, repository)
 
     print(matchs)
 
@@ -148,7 +121,8 @@ async def load_elo_tables():
     wta_elo = await ELO_table("WTA")
     return atp_elo, wta_elo
 
-async def process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, already):
+async def process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, repository):
+    already = repository.load_reviewed_matches()
     processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
     matchs = ""
     matchs_tab = np.empty(256, dtype="<U100")
@@ -161,7 +135,7 @@ async def process_matches(session, session_config, tournaments, mtch, atp_elo, w
             matchs += m_i + "\n"
             matchs_tab[i] = m_i
             i += 1
-            update_match_files(m_i, matchs)
+            repository.save_processed_match(m_i, matchs)
     return matchs
 
 def determine_elo_data(match_url, atp_elo, wta_elo):

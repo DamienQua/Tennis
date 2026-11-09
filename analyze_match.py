@@ -29,7 +29,6 @@ from bs4 import BeautifulSoup
 import time
 import numpy as np
 import jaro
-from itertools import takewhile
 from h2h_table import h2h_table, MatchContext
 from last_matchs import last_matchs
 from compare_players import compare_players
@@ -37,6 +36,7 @@ from odds_match import odds_match
 from indice_confiance import indice_confiance
 from compare_indice import compare_indice
 from generate_match_xlsx import generate_match_xlsx
+from elo_matcher import EloMatcher
 
 async def fetch_data(session, url, method='get', data=None):
     if method == 'get':
@@ -136,33 +136,6 @@ def who_is_favorite(data):
     except:
         return [0, 0]
 
-def get_player_elo(player, match_player_name, surface):
-    player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player.split(" ")))
-    if jaro.jaro_winkler_metric(match_player_name, player_vs) >= 0.95:
-        return extract_elo_rating(player, player_vs, surface)
-    return ""
-
-def find_elo_ratings(elo, match_vs, surface):
-    elo_A = next((get_player_elo(player, match_vs[2], surface) for player in elo.split("\n") if get_player_elo(player, match_vs[2], surface)), "")
-    elo_B = next((get_player_elo(player, match_vs[3], surface) for player in elo.split("\n") if get_player_elo(player, match_vs[3], surface)), "")
-    return elo_A, elo_B
-
-def extract_elo_rating(player, player_name, surface):
-    tokens = player.replace("-", " ").split()
-    if not tokens:
-        return ""
-    if "Hard" not in surface and surface != "Clay":
-        return tokens[-2] if len(tokens) >= 2 else ""
-
-    offset = 1 if "Hard" in surface else 2
-    base_idx = player_name.replace("-", " ").count(" ") + offset
-
-    for idx in range(base_idx, len(tokens)):
-        candidate = tokens[idx]
-        if candidate.replace(".", "", 1).isdigit():
-            return candidate
-    return ""
-
 async def analyze_match(session, header, match, tournaments, elo):
     today = time.time()
     indice_tab = np.zeros(25)
@@ -206,7 +179,7 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     compare_indice(indice_tab, match_vs)
 
-    elo_A, elo_B = find_elo_ratings(elo, match_vs, surface)
+    elo_A, elo_B = EloMatcher.find_elo_ratings(elo, match_vs[2], match_vs[3], surface)
 
     if elo_A.replace(".","").isdigit():
         match_vs[40] = elo_A
