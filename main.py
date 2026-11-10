@@ -23,6 +23,7 @@ import time
 from datetime import datetime
 from dotenv import dotenv_values
 import numpy as np
+from typing import List, Tuple, Optional, Any
 from ELO_table import ELO_table
 from analyze_match import analyze_match
 from aiolimiter import AsyncLimiter
@@ -30,27 +31,34 @@ from collections import namedtuple
 from match_filter import MatchFilter
 from match_repository import MatchRepository
 
-SessionConfig = namedtuple('SessionConfig', ['header', 'connector', 'rate_limit'])
+SessionConfig = namedtuple('SessionConfig', ['header', 'connector', 'rate_limit', 'timeout'])
 
 class MatchProcessor:
-    def __init__(self, session, header, rate_limit, already_processed, match_filter=None):
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        header: dict,
+        rate_limit: AsyncLimiter,
+        already_processed: str,
+        match_filter: Optional[MatchFilter] = None
+    ) -> None:
         self.session = session
         self.header = header
         self.rate_limit = rate_limit
         self.already_processed = already_processed
         self.filter = match_filter or MatchFilter()
 
-    def should_process(self, match_url):
+    def should_process(self, match_url: str) -> bool:
         return self.filter.should_process(match_url, self.already_processed)
 
-    async def fetch_and_analyze(self, match_url, tournaments, elo_data):
+    async def fetch_and_analyze(self, match_url: str, tournaments: Any, elo_data: str) -> str:
         async with self.rate_limit:
             return await analyze_match(self.session, self.header, match_url, tournaments, elo_data)
 
-    def format_result(self, match_info, match_url):
+    def format_result(self, match_info: str, match_url: str) -> str:
         return f"{match_info}, {match_url}"
 
-    async def process(self, match_url, tournaments, elo_data):
+    async def process(self, match_url: str, tournaments: Any, elo_data: str) -> Optional[str]:
         if not self.should_process(match_url):
             return None
 
@@ -63,18 +71,18 @@ class MatchProcessor:
 
         return self.finalize_result(match_info, match_url, start)
 
-    async def handle_connection_error(self):
+    async def handle_connection_error(self) -> None:
         print("Connection error, retrying...")
         await asyncio.sleep(1)
         return None
 
-    def finalize_result(self, match_info, match_url, start):
+    def finalize_result(self, match_info: str, match_url: str, start: float) -> str:
         result = self.format_result(match_info, match_url)
         print("Match : ", result)
         print("Time elapsed : ", round(time.perf_counter() - start, 2), " sec")
         return result
 
-async def fetch_data(session, url, method='get', data=None):
+async def fetch_data(session: aiohttp.ClientSession, url: str, method: str = 'get', data: Optional[dict] = None) -> str:
     methods = {
         'get': session.get,
         'post': session.post
@@ -82,13 +90,14 @@ async def fetch_data(session, url, method='get', data=None):
     async with methods[method](url, data=data) as response:
         return await response.text()
 
-def create_session_config():
+def create_session_config(max_concurrent: int = 10, timeout_seconds: float = 20.0) -> SessionConfig:
     header = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
-    conn = aiohttp.TCPConnector(limit=10)  # 10 simultaneous connections
+    conn = aiohttp.TCPConnector(limit=max_concurrent)
     rate_limit = AsyncLimiter(10, 1)  # 10 requests per second
-    return SessionConfig(header, conn, rate_limit)
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=10.0)
+    return SessionConfig(header, conn, rate_limit, timeout)
 
-async def login(session):
+async def login(session: aiohttp.ClientSession) -> None:
     config = dotenv_values(".env")
     username = config.get("TENNISINSIGHT_LOGIN")
     password = config.get("TENNISINSIGHT_PASSWORD")
@@ -97,48 +106,86 @@ async def login(session):
     login_data = {"log": username, "pwd": password}
     await fetch_data(session, "https://tennisinsight.com/wp-login.php", method='post', data=login_data)
 
-async def fetch_match_previews(session):
+async def fetch_match_previews(session: aiohttp.ClientSession) -> Tuple[np.ndarray, List[str]]:
     mtch_previews_html = await fetch_data(session, "https://tennisinsight.com/match-previews/")
     mtch_previews = BeautifulSoup(mtch_previews_html, "lxml")
     tournaments = np.array([tour.text for tour in mtch_previews.find_all(class_="heading-link") if any(x in tour.text for x in ["ATP", "WTA", "Masters"])])
     mtch = [m.a["href"] for m in mtch_previews.find_all(class_="match-row-link")]
     return tournaments, mtch
 
-async def main():
+async def main() -> None:
     session_config = create_session_config()
     repository = MatchRepository()
     atp_elo, wta_elo = await load_elo_tables()
 
-    async with aiohttp.ClientSession(connector=session_config.connector, headers=session_config.header) as session:
+    async with aiohttp.ClientSession(
+        connector=session_config.connector,
+        headers=session_config.header,
+        timeout=session_config.timeout
+    ) as session:
         await login(session)
         tournaments, mtch = await fetch_match_previews(session)
         matchs = await process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, repository)
 
     print(matchs)
 
-async def load_elo_tables():
+async def load_elo_tables() -> Tuple[str, str]:
     atp_elo = await ELO_table("ATP")
     wta_elo = await ELO_table("WTA")
     return atp_elo, wta_elo
 
-async def process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, repository):
-    already = repository.load_reviewed_matches()
-    processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
-    matchs = ""
-    matchs_tab = np.empty(256, dtype="<U100")
-    i = 0
-
-    for m in mtch:
-        elo_data = determine_elo_data(m, atp_elo, wta_elo)
+async def _process_single_match(
+    m: str,
+    tournaments: Any,
+    elo_data: str,
+    processor: MatchProcessor,
+    semaphore: asyncio.Semaphore,
+    repository: MatchRepository,
+    lock: asyncio.Lock,
+    results: List[str]
+) -> Optional[str]:
+    async with semaphore:
         m_i = await processor.process(m, tournaments, elo_data)
         if m_i:
-            matchs += m_i + "\n"
-            matchs_tab[i] = m_i
-            i += 1
-            repository.save_processed_match(m_i, matchs)
-    return matchs
+            async with lock:
+                results.append(m_i)
+                all_matchs = "\n".join(results) + "\n"
+                repository.save_processed_match(m_i, all_matchs)
+        return m_i
 
-def determine_elo_data(match_url, atp_elo, wta_elo):
+async def process_matches(
+    session: aiohttp.ClientSession,
+    session_config: SessionConfig,
+    tournaments: Any,
+    mtch: List[str],
+    atp_elo: str,
+    wta_elo: str,
+    repository: MatchRepository,
+    max_parallel_matches: int = 2
+) -> str:
+    already = repository.load_reviewed_matches()
+    processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
+    semaphore = asyncio.Semaphore(max_parallel_matches)
+    lock = asyncio.Lock()
+    results: List[str] = []
+
+    tasks = [
+        _process_single_match(
+            m,
+            tournaments,
+            determine_elo_data(m, atp_elo, wta_elo),
+            processor,
+            semaphore,
+            repository,
+            lock,
+            results
+        )
+        for m in mtch
+    ]
+    await asyncio.gather(*tasks)
+    return "\n".join(results) + "\n" if results else ""
+
+def determine_elo_data(match_url: str, atp_elo: str, wta_elo: str) -> str:
     if "atp" in match_url or ("wta" not in match_url and "masters" in match_url):
         return atp_elo + '\n' + wta_elo
     return wta_elo + '\n' + atp_elo

@@ -18,18 +18,19 @@ Notes:
 
 import aiohttp
 from bs4 import BeautifulSoup 
-import functools
+from typing import Dict
 
 class EloFetcher:
     """Fetches and caches ELO ratings HTML content."""
-    cache = {}
+    cache: Dict[str, str] = {}
 
     @classmethod
-    async def fetch_data(cls, url, user_agent):
+    async def fetch_data(cls, url: str, user_agent: str) -> str:
         if url in cls.cache:
             return cls.cache[url]
         headers = {'User-Agent': user_agent}
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=15.0)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, headers=headers) as response:
                 content = await response.text()
                 cls.cache[url] = content
@@ -38,7 +39,7 @@ class EloFetcher:
 _FETCH_CACHE = EloFetcher.cache
 fetch_data = EloFetcher.fetch_data
 
-async def ELO_table(m_w):
+async def ELO_table(m_w: str) -> str:
     table = ""
     elo = ""
     user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'
