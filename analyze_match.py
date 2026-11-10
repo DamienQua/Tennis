@@ -32,7 +32,7 @@ import jaro
 from h2h_table import h2h_table, MatchContext
 from last_matchs import last_matchs
 from compare_players import compare_players
-from odds_match import odds_match
+from odds_match import odds_match, fetch_both_odds
 from indice_confiance import indice_confiance
 from compare_indice import compare_indice
 from generate_match_xlsx import generate_match_xlsx
@@ -111,11 +111,18 @@ def extract_tournament_slug(match_url):
 
 def determine_tournament_and_surface(match, tournaments):
     slug = extract_tournament_slug(match)
-    same_tour = np.zeros(len(tournaments), float)
-    for tourn in tournaments:
-        same_tour[np.where(tournaments == tourn)[0][0]] = jaro.jaro_winkler_metric(slug, tourn.split(" (")[0].lower())
-    tour, surface = tournaments[same_tour.argmax(0)].split(" (")[0], tournaments[same_tour.argmax(0)].split("- ")[1].split(" Court")[0]
-    return tour, surface
+    if tournaments is not None and len(tournaments) > 0:
+        t_list = list(tournaments)
+        same_tour = np.zeros(len(t_list), float)
+        for i, tourn in enumerate(t_list):
+            same_tour[i] = jaro.jaro_winkler_metric(slug, tourn.split(" (")[0].lower())
+        best_idx = int(same_tour.argmax(0))
+        tour_str = t_list[best_idx]
+        tour = tour_str.split(" (")[0]
+        surface = tour_str.split("- ")[1].split(" Court")[0] if "- " in tour_str else "Clay"
+        return tour, surface
+    clean_tour = slug.replace("-", " ").title()
+    return clean_tour, "Clay"
 
 def parse_player_rankings(data):
     rankings = []
@@ -142,13 +149,15 @@ async def analyze_match(session, header, match, tournaments, elo):
     match_vs = np.full(44, "", dtype="<U100")
     admin_url = "https://tennisinsight.com/wp-admin/admin-ajax.php"
 
-    abc = await fetch_data(session, match)
-    soup_abc = BeautifulSoup(abc, "lxml")
-    pA_id, pB_id = extract_player_ids(abc)
     match_id = match.split("match/")[1].split("/")[0]
 
-    overview_data = await fetch_data(session, admin_url, 'post', {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id})
+    abc, overview_data = await asyncio.gather(
+        fetch_data(session, match),
+        fetch_data(session, admin_url, 'post', {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id})
+    )
+    soup_abc = BeautifulSoup(abc, "lxml")
     data = BeautifulSoup(overview_data, "lxml")
+    pA_id, pB_id = extract_player_ids(abc)
 
     tour, surface = determine_tournament_and_surface(match, tournaments)
     match_vs[0] = tour
@@ -156,6 +165,8 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     pA, pB = extract_player_names(soup_abc, match, data.text)
     match_vs[2], match_vs[3] = pA, pB
+
+    odds_future = asyncio.create_task(fetch_both_odds(session, pA, pB))
 
     rankings = parse_player_rankings(data)
     match_vs[4], match_vs[5] = rankings[0], rankings[1]
@@ -175,7 +186,7 @@ async def analyze_match(session, header, match, tournaments, elo):
             
     compare_players(match_vs)
 
-    match_vs, indice_tab = await odds_match(match_vs, indice_tab, session=session)
+    match_vs, indice_tab = await odds_match(match_vs, indice_tab, session=session, odds_future=odds_future)
 
     compare_indice(indice_tab, match_vs)
 

@@ -61,32 +61,43 @@ class MotivationAnalyzer:
 
     def get_tournament_category(self, data):
         try:
-            return data.find(id="activity-table").find_all(class_="subheader")[0].text
-        except IndexError:
-            return "250"
+            table = data.find(id="activity-table") if data else None
+            if table:
+                subheaders = table.find_all(class_="subheader")
+                if subheaders:
+                    return subheaders[0].text
+        except Exception:
+            pass
+        return "250"
+
+    @staticmethod
+    def _get_year_index(show_class, year):
+        for i, item in enumerate(show_class):
+            if str(year) in item.text:
+                return i + 1
+        return -1
+
+    @staticmethod
+    def _count_matches_in_year(show_class, start_index):
+        count = 0
+        for i in range(start_index, len(show_class)):
+            if show_class[i].text == "Date":
+                break
+            count += 1
+        return count
 
     def count_matches(self, data):
-        def get_year_index(show_class, year):
-            for i, item in enumerate(show_class):
-                if str(year) in item.text:
-                    return i + 1
-            return -1
-
-        def count_matches_in_year(show_class, start_index):
-            count = 0
-            for i in range(start_index, len(show_class)):
-                if show_class[i].text == "Date":
-                    break
-                count += 1
-            return count
-        show_class = data.find(id="activity-table").find_all(class_="show")
-        year = date.today().year
         try:
-            start_index = get_year_index(show_class, year)
+            table = data.find(id="activity-table") if data else None
+            if not table:
+                return -1
+            show_class = table.find_all(class_="show")
+            year = date.today().year
+            start_index = self._get_year_index(show_class, year)
             if start_index == -1:
                 return -1
-            return count_matches_in_year(show_class, start_index)
-        except:
+            return self._count_matches_in_year(show_class, start_index)
+        except Exception:
             return -1
 
     def calculate_motivation_index(self, cat, nb_matchs, flag):

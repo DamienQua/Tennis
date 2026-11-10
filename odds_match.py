@@ -29,16 +29,17 @@ async def fetch_odds(session, player):
     delay = 0.25
 
     for attempt in range(max_retries):
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                await asyncio.sleep(delay)  # Wait for content to load
-                return await resp.text()
-            else:
-                print(f"Attempt {attempt + 1} failed. Status: {resp.status}")
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    return await resp.text()
                 if attempt < max_retries - 1:
                     await asyncio.sleep(delay)
+        except Exception:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delay)
     
-    raise Exception(f"Unable to load page for {player} after {max_retries} attempts")
+    return ""
 
 def _extract_match_name(text):
     home = re.search(r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
@@ -96,28 +97,40 @@ async def process_odds(html, match_vs, indice_tab, player_index):
     _update_odds_indices(match_vs, indice_tab)
     return True
 
-async def _odds_match_impl(session, match_vs, indice_tab):
-    player1, player2 = match_vs[2].split(" ")[-1], match_vs[3].split(" ")[-1]
-    html1, html2 = await asyncio.gather(
-        fetch_odds(session, player1),
-        fetch_odds(session, player2)
+async def fetch_both_odds(session, player1_name, player2_name):
+    p1 = player1_name.split(" ")[-1] if player1_name else ""
+    p2 = player2_name.split(" ")[-1] if player2_name else ""
+    return await asyncio.gather(
+        fetch_odds(session, p1),
+        fetch_odds(session, p2)
     )
-    
+
+async def apply_odds_data(html1, html2, match_vs, indice_tab):
     success = await process_odds(html1, match_vs, indice_tab, 2)
     if not success:
-        success = await process_odds(html2, match_vs, indice_tab, 3)
+        await process_odds(html2, match_vs, indice_tab, 3)
     
-    if float(match_vs[36]) < float(match_vs[37]):
+    oA = float(match_vs[36]) if match_vs[36] else 0.0
+    oB = float(match_vs[37]) if match_vs[37] else 0.0
+    if oA < oB:
         indice_tab[22], indice_tab[23] = 40, 0
-    elif float(match_vs[36]) > float(match_vs[37]):
+    elif oA > oB:
         indice_tab[22], indice_tab[23] = 0, 40
     else:
         indice_tab[22], indice_tab[23] = 20, 20
 
     return match_vs, indice_tab
 
-async def odds_match(match_vs, indice_tab, session=None):
+async def _odds_match_impl(session, match_vs, indice_tab, odds_future=None):
+    if odds_future is not None:
+        html1, html2 = await odds_future
+    else:
+        html1, html2 = await fetch_both_odds(session, match_vs[2], match_vs[3])
+    
+    return await apply_odds_data(html1, html2, match_vs, indice_tab)
+
+async def odds_match(match_vs, indice_tab, session=None, odds_future=None):
     if session is not None:
-        return await _odds_match_impl(session, match_vs, indice_tab)
+        return await _odds_match_impl(session, match_vs, indice_tab, odds_future=odds_future)
     async with aiohttp.ClientSession() as new_session:
-        return await _odds_match_impl(new_session, match_vs, indice_tab)
+        return await _odds_match_impl(new_session, match_vs, indice_tab, odds_future=odds_future)

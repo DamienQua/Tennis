@@ -22,8 +22,8 @@ class MatchStatisticsProcessor:
         self.data_fetcher = data_fetcher
         self.stats_processor = stats_processor
 
-    async def process_match_statistics(self, player_id, match_id, tour_now):
-        data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
+    async def process_match_statistics(self, player_id, match_id, tour_now, activity_data=None):
+        data = activity_data if activity_data is not None else await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
         pAB_matchs = data.find_all(class_="activity-clickthroughs no-link") if data else []
 
         min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0

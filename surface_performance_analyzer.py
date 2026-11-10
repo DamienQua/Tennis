@@ -15,20 +15,55 @@
 from bs4 import BeautifulSoup
 
 class SurfacePerformanceAnalyzer:
+    SURFACE_INDICES = {"Hard": 12, "Indoor Hard": 19, "Carpet": 26, "Clay": 33, "Grass": 40}
+    _stats_cache = {}
+
     def __init__(self, data_fetcher, admin_url):
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
 
-    async def analyze(self, match_id, surface, flag):
-        stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
-        data = BeautifulSoup(stats_html, "lxml")
-        i = 1 if flag == 0 else 4
-        
-        surface_indices = {"Hard": 12, "Indoor Hard": 19, "Carpet": 26, "Clay": 33, "Grass": 40}
-        win_sur = float(data.find_all(class_="table match-preview-statistics-table")[i].find_all("td")[surface_indices[surface]].text.replace("%", "").replace("N/A", "0"))
-        
+    async def fetch_statistics_html(self, match_id):
+        if match_id in SurfacePerformanceAnalyzer._stats_cache:
+            return SurfacePerformanceAnalyzer._stats_cache[match_id]
+        html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
+        SurfacePerformanceAnalyzer._stats_cache[match_id] = html
+        return html
+
+    @classmethod
+    def _find_surface_index(cls, surface):
+        idx = cls.SURFACE_INDICES.get(surface)
+        if idx is not None:
+            return idx
+        for name, index in cls.SURFACE_INDICES.items():
+            if name.lower() in surface.lower():
+                return index
+        return None
+
+    def _extract_tds(self, data, flag):
+        table_idx = 1 if flag == 0 else 4
+        tables = data.find_all(class_="table match-preview-statistics-table")
+        if len(tables) > table_idx:
+            return tables[table_idx].find_all("td")
+        return []
+
+    def _calculate_surface_rank(self, tds, target_idx):
+        win_sur = float(tds[target_idx].text.replace("%", "").replace("N/A", "0"))
         rank = 10
-        for j in range(12, 41, 7):
-            if win_sur > float(data.find_all(class_="table match-preview-statistics-table")[i].find_all("td")[j].text.replace("%", "").replace("N/A", "0")):
+        for j in range(12, min(len(tds), 41), 7):
+            val = float(tds[j].text.replace("%", "").replace("N/A", "0"))
+            if win_sur > val:
                 rank += 10
         return rank
+
+    async def analyze(self, match_id, surface, flag):
+        try:
+            stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
+            target_idx = self._find_surface_index(surface)
+            if target_idx is None:
+                return 10
+            tds = self._extract_tds(BeautifulSoup(stats_html, "lxml"), flag)
+            if len(tds) <= target_idx:
+                return 10
+            return self._calculate_surface_rank(tds, target_idx)
+        except Exception:
+            return 10
