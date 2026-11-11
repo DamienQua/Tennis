@@ -136,6 +136,15 @@ async def main() -> None:
         matchs = await process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, repository)
 
     print(matchs)
+    _notify_daily_results(matchs)
+
+def _notify_daily_results(matchs_str: str) -> None:
+    from alpha_tracker import get_session_bets
+    from email_notifier import send_daily_email
+
+    total_matches = len([line for line in (matchs_str or "").split("\n") if line.strip()])
+    bets = get_session_bets()
+    send_daily_email(bets, total_matches=total_matches)
 
 async def load_elo_tables() -> Tuple[str, str]:
     atp_elo = await ELO_table("ATP")

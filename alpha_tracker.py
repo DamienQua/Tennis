@@ -8,12 +8,19 @@ Ensures deduplication and professional formatting for easy performance tracking.
 
 import os
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 TRACKING_FILE = "Paris_Alpha_5_Plus.xlsx"
+SESSION_BETS: List[Dict[str, Any]] = []
+
+def get_session_bets() -> List[Dict[str, Any]]:
+    return list(SESSION_BETS)
+
+def clear_session_bets() -> None:
+    SESSION_BETS.clear()
 
 HEADERS = [
     "Date Détection",
@@ -141,6 +148,21 @@ def _auto_fit_columns(sheet):
         col_letter = get_column_letter(col[0].column)
         sheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
+def _append_session_bet(tournament, surface, p1, p2, alpha_res, match_url):
+    SESSION_BETS.append({
+        "tournament": tournament,
+        "surface": surface,
+        "player1": p1,
+        "player2": p2,
+        "selected_player": alpha_res.get("selected_player", ""),
+        "book_odds": alpha_res.get("book_odds", 0.0),
+        "model_odds": alpha_res.get("model_odds", 0.0),
+        "model_prob": alpha_res.get("model_prob", 0.0),
+        "ev_percent": alpha_res.get("ev_percent", 0.0),
+        "elo_diff": alpha_res.get("elo_diff", 0.0),
+        "match_url": match_url
+    })
+
 def record_alpha_selection(
     tournament: str,
     surface: str,
@@ -153,6 +175,7 @@ def record_alpha_selection(
     if not alpha_res.get("bet_recommended"):
         return False
 
+    _append_session_bet(tournament, surface, player1, player2, alpha_res, match_url)
     wb, sheet = _create_or_load_wb(filepath)
 
     if _is_duplicate(sheet, match_url, player1, player2):

@@ -1,0 +1,50 @@
+name: Tennis Daily Predictions & Alpha 5+ Tracker
+
+on:
+  schedule:
+    # Tous les matins à 07:00 UTC (08:00 heure d'hiver / 09:00 heure d'été en France)
+    - cron: '0 7 * * *'
+  # Déclenchement manuel d'un clic depuis l'onglet Actions de GitHub
+  workflow_dispatch:
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📥 Récupération du dépôt
+        uses: actions/checkout@v4
+
+      - name: 🐍 Installation de Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Installation des dépendances
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🎾 Exécution de l'analyse & détection Alpha 5+
+        env:
+          TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN }}
+          TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+        run: |
+          python main.py
+
+      - name: 💾 Sauvegarde automatique de l'historique des paris
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add Paris_Alpha_5_Plus.xlsx Reviewed_Matchs.txt Matchs.txt || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: mise à jour automatique des paris Alpha 5+ [skip ci]"
+          git push
