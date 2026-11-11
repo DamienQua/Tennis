@@ -105,12 +105,18 @@ def create_session_config(max_concurrent: int = 10, timeout_seconds: float = 20.
     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=10.0)
     return SessionConfig(header, conn, rate_limit, timeout)
 
+def _get_credential(config: dict, key: str) -> str:
+    val = os.environ.get(key)
+    if val:
+        return val
+    return config.get(key, "")
+
 async def login(session: aiohttp.ClientSession) -> None:
-    config = dotenv_values(".env")
-    username = config.get("TENNISINSIGHT_LOGIN")
-    password = config.get("TENNISINSIGHT_PASSWORD")
+    config = dotenv_values(".env") if os.path.exists(".env") else {}
+    username = _get_credential(config, "TENNISINSIGHT_LOGIN")
+    password = _get_credential(config, "TENNISINSIGHT_PASSWORD")
     if not username or not password:
-        raise ValueError("Erreur: Les identifiants TENNISINSIGHT_LOGIN et TENNISINSIGHT_PASSWORD doivent être définis dans le fichier .env")
+        raise ValueError("Erreur: Les identifiants TENNISINSIGHT_LOGIN et TENNISINSIGHT_PASSWORD doivent être définis (dans les variables d'environnement ou le fichier .env)")
     login_data = {"log": username, "pwd": password}
     await fetch_data(session, "https://tennisinsight.com/wp-login.php", method='post', data=login_data)
 
