@@ -68,6 +68,12 @@ class MatchProcessor:
             match_info = await self.fetch_and_analyze(match_url, tournaments, elo_data)
         except aiohttp.ClientError:
             return await self.handle_connection_error()
+        except Exception as e:
+            print(f"Erreur lors de l'analyse du match {match_url}: {e}")
+            return None
+
+        if not match_info:
+            return None
 
         return self.finalize_result(match_info, match_url, start)
 
@@ -76,10 +82,12 @@ class MatchProcessor:
         await asyncio.sleep(1)
         return None
 
-    def finalize_result(self, match_info: str, match_url: str, start: float) -> str:
+    def finalize_result(self, match_info: str, match_url: str, start: float, parallel_count: int = 3) -> str:
         result = self.format_result(match_info, match_url)
-        print("Match : ", result)
-        print("Time elapsed : ", round(time.perf_counter() - start, 2), " sec")
+        raw_elapsed = round(time.perf_counter() - start, 2)
+        effective_time = round(raw_elapsed / parallel_count, 2)
+        print(f"Match : {result}")
+        print(f"Time elapsed : {raw_elapsed} sec (temps effectif amorti: ~{effective_time} sec/match)\n")
         return result
 
 async def fetch_data(session: aiohttp.ClientSession, url: str, method: str = 'get', data: Optional[dict] = None) -> str:
@@ -161,7 +169,7 @@ async def process_matches(
     atp_elo: str,
     wta_elo: str,
     repository: MatchRepository,
-    max_parallel_matches: int = 2
+    max_parallel_matches: int = 3
 ) -> str:
     already = repository.load_reviewed_matches()
     processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
@@ -169,6 +177,7 @@ async def process_matches(
     lock = asyncio.Lock()
     results: List[str] = []
 
+    batch_start = time.perf_counter()
     tasks = [
         _process_single_match(
             m,
@@ -183,6 +192,13 @@ async def process_matches(
         for m in mtch
     ]
     await asyncio.gather(*tasks)
+    total_elapsed = round(time.perf_counter() - batch_start, 2)
+    count = len(results)
+    avg_per_match = round(total_elapsed / count, 2) if count > 0 else 0.0
+    print(f"\n{'='*55}")
+    print(f"Total processing time : {total_elapsed} sec ({count} match(s) processed)")
+    print(f"Average time per match: {avg_per_match} sec/match")
+    print(f"{'='*55}\n")
     return "\n".join(results) + "\n" if results else ""
 
 def determine_elo_data(match_url: str, atp_elo: str, wta_elo: str) -> str:

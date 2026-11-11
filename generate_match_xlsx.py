@@ -3,7 +3,8 @@ Generate an Excel file with detailed tennis match analysis.
 
 This function creates an Excel workbook with comprehensive statistics comparing two tennis players.
 The generated file includes performance metrics such as world ranking, win percentages, 
-service statistics, and estimated match odds.
+service statistics, estimated match odds, bookmaker odds, Elo ratings,
+and the Alpha 5+ All-Court betting strategy recommendations.
 
 Args:
     match_vs (list): A list containing match and player statistics.
@@ -17,9 +18,10 @@ Example:
 
 import os
 import openpyxl
-from openpyxl.styles import Border, Side
+from openpyxl.styles import Border, Side, PatternFill, Font
 from openpyxl.utils import get_column_letter
 from datetime import datetime
+from alpha_strategy import evaluate_alpha_strategy
 
 async def generate_match_xlsx(match_vs):
     """Generate Excel file for tennis match analysis."""
@@ -34,12 +36,22 @@ async def generate_match_xlsx(match_vs):
     _populate_sheet_with_data(sheet, xlsx_data)
     _adjust_column_widths(sheet)
     _apply_cell_borders(sheet)
+    _apply_strategy_styling(sheet)
     
     file_path = _save_workbook(workbook, date, tournament, player1, player2)
     print(f"Excel file '{file_path}' has been generated.")
 
+def _safe_get(match_vs, index):
+    return match_vs[index] if len(match_vs) > index else ""
+
 def _prepare_match_data(match_vs, player1, player2):
     """Prepare the data structure for the Excel sheet."""
+    m1, m2 = _safe_get(match_vs, 36), _safe_get(match_vs, 37)
+    b1, b2 = _safe_get(match_vs, 38), _safe_get(match_vs, 39)
+    e1, e2 = _safe_get(match_vs, 40), _safe_get(match_vs, 41)
+    
+    alpha = evaluate_alpha_strategy(m1, m2, b1, b2, e1, e2, player1, player2)
+
     return [
         ["", player1, player2],
         ["Classement mondial", match_vs[4], match_vs[5]],
@@ -62,14 +74,24 @@ def _prepare_match_data(match_vs, player1, player2):
         ["% points gagnés service", match_vs[23], match_vs[34]],
         ["% balles de break sauvées", match_vs[24], match_vs[35]],
         ["", "", ""],
-        ["Pourcentage victoire", _calculate_win_percentage(match_vs[36]), _calculate_win_percentage(match_vs[37])],
+        ["Pourcentage victoire", _calculate_win_percentage(m1), _calculate_win_percentage(m2)],
         ["", "", ""],
-        ["Côte estimée", match_vs[36], match_vs[37]],
+        ["Côte estimée", m1, m2],
+        ["Cote Bookmaker", b1, b2],
+        ["Classement ELO", e1, e2],
+        ["", "", ""],
+        ["STRATÉGIE ALPHA 5+", alpha["signal_j1"], alpha["signal_j2"]],
+        ["Espérance de gain (EV)", alpha["ev_j1_str"], alpha["ev_j2_str"]],
+        ["Écart ELO (ΔELO)", alpha["elo_diff_j1_str"], alpha["elo_diff_j2_str"]],
     ]
 
 def _calculate_win_percentage(odds_value):
     """Calculate win percentage from odds."""
-    return round(90 / float(odds_value), 2)
+    try:
+        val = float(odds_value)
+        return round(90 / val, 2) if val > 0 else 0.0
+    except (ValueError, TypeError):
+        return 0.0
 
 def _populate_sheet_with_data(sheet, xlsx_data):
     """Add data rows to the Excel sheet."""
@@ -104,6 +126,24 @@ def _apply_cell_borders(sheet):
         for cell in row:
             cell.border = thin_border
 
+def _color_signal_cells(cells, fill, font):
+    for cell in cells:
+        if cell.value == "PARI CONSEILLÉ":
+            cell.fill = fill
+            cell.font = font
+
+def _apply_strategy_styling(sheet):
+    """Highlight Alpha 5+ recommended bet cells."""
+    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    green_font = Font(color="006100", bold=True)
+    bold_font = Font(bold=True)
+
+    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column):
+        header = str(row[0].value or "")
+        if "STRATÉGIE ALPHA 5+" in header:
+            row[0].font = bold_font
+            _color_signal_cells(row[1:], green_fill, green_font)
+
 def _create_thin_border():
     """Create a thin border style for cells."""
     return Border(
@@ -122,10 +162,16 @@ def _save_workbook(workbook, date, tournament, player1, player2):
     workbook.save(full_path)
     return full_path
 
+def _extract_year_from_tournament(tournament: str) -> int:
+    for word in tournament.split():
+        if word.isdigit() and len(word) == 4 and word.startswith("20"):
+            return int(word)
+    return datetime.now().year
+
 def _create_match_folder(tournament):
     """Create the directory structure for match files."""
-    year = datetime.now().year
-    month = datetime.now().strftime("%B")
+    year = _extract_year_from_tournament(tournament)
+    month = "January" if year < datetime.now().year else datetime.now().strftime("%B")
     
     folder_path = os.path.join("Matchs", str(year), month, tournament.replace(' ', '_'))
     os.makedirs(folder_path, exist_ok=True)

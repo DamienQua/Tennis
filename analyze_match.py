@@ -37,18 +37,60 @@ from indice_confiance import indice_confiance
 from compare_indice import compare_indice
 from generate_match_xlsx import generate_match_xlsx
 from elo_matcher import EloMatcher
+from alpha_strategy import evaluate_alpha_strategy
+from alpha_tracker import record_alpha_selection
+
+async def _fetch_url_response(session, url, method, data):
+    if method == 'post':
+        return await session.post(url, data=data)
+    return await session.get(url)
+
+async def _attempt_fetch(session, url, method, data):
+    async with await _fetch_url_response(session, url, method, data) as response:
+        if response.status == 200:
+            return await response.text()
+        return None
 
 async def fetch_data(session, url, method='get', data=None):
-    if method == 'get':
-        async with session.get(url) as response:
-            return await response.text()
-    elif method == 'post':
-        async with session.post(url, data=data) as response:
-            return await response.text()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            result = await _attempt_fetch(session, url, method, data)
+            if result is not None:
+                return result
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.0 * (attempt + 1))
+        except Exception:
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.0 * (attempt + 1))
+    return ""
 
-def extract_player_ids(abc):
-    pA_id = abc.split("?playerid=")[1].split('"')[0]
-    pB_id = abc.split("?playerid=")[2].split('"')[0]
+def _ids_from_soup(soup_abc):
+    if not soup_abc:
+        return []
+    seen = []
+    for a in soup_abc.find_all('a', href=re.compile(r'/player/\?playerid=\d+')):
+        m = re.search(r'playerid=(\d+)', a.get('href', ''))
+        if m and m.group(1) not in seen and 'General Comments' not in a.text:
+            seen.append(m.group(1))
+    return seen
+
+def _ids_from_regex(abc):
+    raw = re.findall(r'/player/\?playerid=(\d+)', abc)
+    if len(raw) < 2:
+        raw = re.findall(r'playerid=(\d+)', abc)
+    seen = []
+    for pid in raw:
+        if pid not in seen:
+            seen.append(pid)
+    return seen
+
+def extract_player_ids(abc, soup_abc=None):
+    ids = _ids_from_soup(soup_abc)
+    if len(ids) < 2 and isinstance(abc, str):
+        ids = _ids_from_regex(abc)
+    pA_id = ids[0] if len(ids) > 0 else ""
+    pB_id = ids[1] if len(ids) > 1 else ""
     return pA_id, pB_id
 
 def clean_player_name(name):
@@ -157,7 +199,11 @@ async def analyze_match(session, header, match, tournaments, elo):
     )
     soup_abc = BeautifulSoup(abc, "lxml")
     data = BeautifulSoup(overview_data, "lxml")
-    pA_id, pB_id = extract_player_ids(abc)
+    pA_id, pB_id = extract_player_ids(abc, soup_abc)
+
+    if not pA_id or not pB_id:
+        print(f"⚠️ Identifiants joueurs introuvables pour {match} - match ignoré.")
+        return ""
 
     tour, surface = determine_tournament_and_surface(match, tournaments)
     match_vs[0] = tour
@@ -197,7 +243,22 @@ async def analyze_match(session, header, match, tournaments, elo):
     if elo_B.replace(".","").isdigit():
         match_vs[41] = elo_B
 
+    alpha_res = evaluate_alpha_strategy(
+        match_vs[36], match_vs[37],
+        match_vs[38], match_vs[39],
+        match_vs[40], match_vs[41],
+        match_vs[2], match_vs[3]
+    )
+    print(f"  {alpha_res['summary']}")
+
+    record_alpha_selection(
+        match_vs[0], match_vs[1],
+        match_vs[2], match_vs[3],
+        alpha_res, match
+    )
+
     await generate_match_xlsx(match_vs)
 
     return ", ".join(match_vs[:4]) + ", " + ", ".join(match_vs[-8:-2]) + \
-           ", " + match_vs[15] + ", " + match_vs[26] + ", " + str(indice_tab[-1])
+           ", " + match_vs[15] + ", " + match_vs[26] + ", " + str(indice_tab[-1]) + \
+           ", " + match_vs[19] + ", " + match_vs[30]
