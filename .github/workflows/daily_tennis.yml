@@ -31,13 +31,13 @@ jobs:
 
       - name: 🎾 Exécution de l'analyse & détection Alpha 5+
         env:
-          TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN }}
-          TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.gmail.com' }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+          TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN || vars.TENNISINSIGHT_LOGIN }}
+          TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD || vars.TENNISINSIGHT_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER || vars.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || vars.SMTP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT || vars.EMAIL_RECIPIENT }}
         run: |
           python main.py
 
