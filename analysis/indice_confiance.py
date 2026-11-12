@@ -25,7 +25,7 @@ from datetime import date
 import aiohttp
 from bs4 import BeautifulSoup
 
-from analysis.last_matchs import TennisDataFetcher
+from analysis.tennis_data_fetcher import TennisDataFetcher
 from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
 from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
 from utils.helpers import get_arg

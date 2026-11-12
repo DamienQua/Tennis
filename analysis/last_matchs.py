@@ -1,195 +1,27 @@
 """
-Tennis match analysis module for fetching and processing player and match statistics.
-
-This module provides classes and methods to:
-- Fetch tennis match data from an admin URL
-- Parse player activity and match statistics
-- Calculate win percentages and match-related metrics
-- Analyze match details for two players
+Tennis match analysis module for coordinating recent matches, activity, and statistics.
 
 Key classes:
-- TennisDataFetcher: Handles async data retrieval from a tennis statistics source
-- TennisDataParser: Parses raw match and player data
-- StatisticsProcessor: Processes match statistics
-- TennisMatchAnalyzer: Coordinates match analysis and data processing
-
-The last_matchs function serves as the main entry point for match analysis.
+- TennisMatchAnalyzer: Coordinates match analysis, win percentages, and odds spreads
+- last_matchs: Main entry point function for analyzing player recent match history
 """
 
 import asyncio
+from typing import Any, List, Optional
+
 import aiohttp
 from bs4 import BeautifulSoup
+
 from analysis.match_statistics_processor import MatchStatisticsProcessor
+from analysis.tennis_data_fetcher import TennisDataFetcher
+from analysis.tennis_data_parser import StatisticsProcessor, TennisDataParser
 from utils.helpers import DateHelper, get_arg
 
-class TennisDataFetcher:
-    """Retrieves HTML and statistical data asynchronously with retry logic."""
-
-    _activity_pane_cache = {}
-
-    def __init__(self, session, admin_url=None):
-        self.session = session
-        self.admin_url = admin_url
-
-    async def fetch_data(self, url, data=None, method='POST'):
-        """Fetches HTML data asynchronously with retry logic."""
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                if method.upper() == 'GET':
-                    req = self.session.get(url)
-                else:
-                    req = self.session.post(url, data=data)
-                async with req as response:
-                    return await response.text()
-            except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1.0)
-                else:
-                    raise
-        return ""
-
-    @staticmethod
-    def _extract_tournament_name(soup):
-        for elem_id in ("basic-this-tournament-A", "basic-this-tournament-B"):
-            elem = soup.find(id=elem_id)
-            val = elem.get("value") if elem else ""
-            if "At " in val:
-                parts = val.split("At ")
-                if len(parts) > 1 and parts[1].strip():
-                    return parts[1].strip()
-        return ""
-
-    async def fetch_tournament_data(self, match_id, default_tour=""):
-        """Fetches tournament metadata and parses tournament name."""
-        try:
-            if match_id not in TennisDataFetcher._activity_pane_cache:
-                pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
-                TennisDataFetcher._activity_pane_cache[match_id] = await self.fetch_data(
-                    self.admin_url, pane_req
-                )
-            soup = BeautifulSoup(TennisDataFetcher._activity_pane_cache[match_id], "lxml")
-            tour_name = self._extract_tournament_name(soup)
-            if tour_name:
-                return tour_name
-        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, AttributeError):
-            pass
-        return default_tour or ""
-
-    async def fetch_player_activity(self, player_id, match_id, activity_option, odds_option = "0"):
-        """Fetches player activity pane HTML for a given page index."""
-        player_param = {
-            "action": "playerActivity",
-            "activityOffset": "0",
-            "basic-activity-option": str(activity_option),
-            "odds": str(odds_option),
-            "filterType": "basic",
-            "playerID": player_id,
-            "matchID": match_id
-        }
-        data_html = await self.fetch_data(self.admin_url, player_param)
-        return BeautifulSoup(data_html, "lxml")
-
-    async def fetch_player_activities(self, player_id, match_id):
-        """Fetches activity and surface statistics panes concurrently."""
-        return await asyncio.gather(
-            self.fetch_player_activity(player_id, match_id, 1),
-            self.fetch_player_activity(player_id, match_id, 2)
-        )
-
-    async def fetch_player_activity_with_odds(
-            self, player_id, match_id, activity_option, flag, favorite
-    ):
-        """Fetches activity pane and odds spread concurrently."""
-        odds_option = "5" if favorite[flag] == 1 else "6"
-        return await self.fetch_player_activity(
-            player_id, match_id, activity_option, odds_option
-        )
-
-    async def fetch_match_statistics(self, match_element):
-        """Fetches detailed statistics for a specific match element."""
-        try:
-            a_tags = match_element.find_all("a") if match_element else []
-            valid_link = len(a_tags) >= 2 and a_tags[1].has_attr("data-action")
-            if valid_link and a_tags[1].has_attr("data-matchid"):
-                action_data = {
-                    "action": a_tags[1]["data-action"],
-                    "matchID": a_tags[1]["data-matchid"]
-                }
-                stats_match_html = await self.fetch_data(self.admin_url, action_data)
-                return BeautifulSoup(stats_match_html, "lxml")
-        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, AttributeError, IndexError):
-            pass
-        return None
-
-class TennisDataParser:
-    """Parses player win percentages, match history, and performance statistics."""
-
-    @staticmethod
-    def _extract_single_percentage(percentage_str):
-        try:
-            cleaned = percentage_str.replace("N/A", "0").strip().replace("\t", "")
-            parts = cleaned.split("\n\n")
-            target = parts[1] if len(parts) > 1 else parts[0]
-            val = target.replace("N/A", "0").strip().split("%")[0].strip()
-            return float(val) if val else 0.0
-        except (ValueError, IndexError, AttributeError):
-            return 0.0
-
-    @classmethod
-    def parse_win_percentages(cls, data):
-        """Parses win percentages across all surfaces from HTML."""
-        if not data or not getattr(data, "text", None):
-            return []
-        text = data.text
-        lower_text = text.lower()
-        # Use case-insensitive position search but extract from original text to preserve "N/A"
-        def split_after(marker):
-            """Splits string after specified delimiter safely."""
-            pos = lower_text.find(marker.lower())
-            return [text[pos + len(marker):]] if pos >= 0 else []
-        win_percentages = text.split("Matches")[1:3] + split_after("months)") + split_after("2000)")
-        return [cls._extract_single_percentage(part) for part in win_percentages]
-
-    @staticmethod
-    def parse_match_statistics(stats_match):
-        """Parses serve and return statistics from match HTML."""
-        if not stats_match:
-            return 0, 0, 0, 0
-        try:
-            heading = stats_match.find("h5")
-            min_tour = int(heading.text.split(" m")[0]) if heading and " m" in heading.text else 0
-            cols = stats_match.find_all(class_="col-xs-4")
-            def _extract_pct(idx):
-                if len(cols) <= idx:
-                    return 0.0
-                return float(cols[idx].text.replace("N/A", "0").strip().split("%")[0])
-
-            per_first_serve = _extract_pct(9)
-            points_first_serve = _extract_pct(12)
-            per_save_bp = _extract_pct(18)
-            return min_tour, per_first_serve, points_first_serve, per_save_bp
-        except (IndexError, ValueError, AttributeError, TypeError):
-            return 0, 0, 0, 0
-
-class StatisticsProcessor:
-    """Delegates statistical parsing operations for tennis match data."""
-
-    @staticmethod
-    def calculate_win_percentages(data):
-        """Calculates win percentages from parsed activity data."""
-        return TennisDataParser.parse_win_percentages(data)
-
-    @staticmethod
-    async def process_match_statistics(data_fetcher, matches_list, m_i, *args, **kwargs):
-        """Processes match statistics asynchronously for given match index."""
-        stats_match = await data_fetcher.fetch_match_statistics(matches_list[m_i])
-        return TennisDataParser.parse_match_statistics(stats_match)
 
 class TennisMatchAnalyzer:
     """Coordinates data fetching, parsing, and analysis for previewed tennis matches."""
 
-    def __init__(self, session, admin_url):
+    def __init__(self, session: aiohttp.ClientSession, admin_url: Optional[str] = None):
         self.data_fetcher = TennisDataFetcher(session, admin_url)
         self.stats_processor = StatisticsProcessor()
         self.match_statistics_processor = MatchStatisticsProcessor(
@@ -197,7 +29,7 @@ class TennisMatchAnalyzer:
         )
 
     @staticmethod
-    def _get_odds_table_tokens(odds_spread):
+    def _get_odds_table_tokens(odds_spread: Optional[BeautifulSoup]) -> Optional[List[str]]:
         try:
             if not odds_spread:
                 return None
@@ -209,7 +41,9 @@ class TennisMatchAnalyzer:
             return None
 
     @staticmethod
-    def _extract_odds_spread_value(odds_spread, is_favorite):
+    def _extract_odds_spread_value(
+            odds_spread: Optional[BeautifulSoup], is_favorite: bool
+    ) -> Optional[float]:
         odds_data = TennisMatchAnalyzer._get_odds_table_tokens(odds_spread)
         if not odds_data:
             return None
@@ -219,7 +53,9 @@ class TennisMatchAnalyzer:
             return -val if is_favorite else val
         return None
 
-    async def _update_player_odds(self, match_vs, player_id, match_id, last_flag, favorite):
+    async def _update_player_odds(
+            self, match_vs, player_id: str, match_id: str, last_flag: int, favorite: Any
+    ) -> None:
         try:
             odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(
                 player_id, match_id, 1, last_flag, favorite
@@ -233,7 +69,7 @@ class TennisMatchAnalyzer:
         ):
             pass
 
-    async def _fetch_match_context(self, match_id, player_id, default_tour):
+    async def _fetch_match_context(self, match_id: str, player_id: str, default_tour: str):
         """Fetches tournament context and player activity datasets."""
         gathered = await asyncio.gather(
             self.fetch_tournament_data(match_id, default_tour=default_tour),
@@ -265,11 +101,13 @@ class TennisMatchAnalyzer:
 
         return match_vs
 
-    async def fetch_tournament_data(self, match_id, default_tour=""):
+    async def fetch_tournament_data(self, match_id: str, default_tour: str = "") -> str:
         """Delegates fetching tournament metadata to data fetcher."""
         return await self.data_fetcher.fetch_tournament_data(match_id, default_tour=default_tour)
 
-    def extract_win_percentages(self, data_act1, data_surf):
+    def extract_win_percentages(
+            self, data_act1: Optional[BeautifulSoup], data_surf: Optional[BeautifulSoup]
+    ) -> List[float]:
         """Extracts win percentages from activity and surface data."""
         raw_all = self.stats_processor.calculate_win_percentages(data_act1)
         all_percentages = (list(raw_all) + [0.0] * 4)[:4]
@@ -280,13 +118,13 @@ class TennisMatchAnalyzer:
 
         return all_percentages + surface_percentages
 
-    async def calculate_win_percentages(self, player_id, match_id):
+    async def calculate_win_percentages(self, player_id: str, match_id: str) -> List[float]:
         """Fetches player activity and computes surface win percentages."""
         data_act1, data_surf = await self.data_fetcher.fetch_player_activities(player_id, match_id)
         return self.extract_win_percentages(data_act1, data_surf)
 
     @staticmethod
-    def calculate_matches_last_month(today, data):
+    def calculate_matches_last_month(today: float, data: Optional[BeautifulSoup]) -> int:
         """Counts player matches played within the last 30 days."""
         try:
             activity_table = data.find(id="activity-table") if data else None
@@ -299,13 +137,14 @@ class TennisMatchAnalyzer:
 
     @staticmethod
     def update_match_vs(
-            match_vs, win_percentages, match_stats, nb_match_last_month, last_flag
-    ):
+            match_vs, win_percentages, match_stats, nb_match_last_month: int, last_flag: int
+    ) -> None:
         """Updates match vector slice with extracted statistics."""
         offset = 14 + 11 * last_flag
         win_pct_list = (list(win_percentages) + [0.0] * 6)[:6]
         stats_list = (list(match_stats) + [0.0] * 4)[:4]
         match_vs[offset:offset+11] = win_pct_list + [nb_match_last_month] + stats_list
+
 
 async def last_matchs(*args, **kwargs):
     """Entry point for analyzing player recent match statistics."""
