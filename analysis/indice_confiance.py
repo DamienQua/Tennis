@@ -20,15 +20,19 @@ Key components:
 """
 
 import asyncio
+from datetime import date
+
 import aiohttp
 from bs4 import BeautifulSoup
-from datetime import date
-from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
-from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
+
 from analysis.last_matchs import TennisDataFetcher
+from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
+from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
 from utils.helpers import get_arg
 
 class MotivationAnalyzer:
+    """Analyzes player motivation by tracking tournament tiers and recent activity count."""
+
     def __init__(self, data_fetcher, admin_url, indice_tab):
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
@@ -36,6 +40,7 @@ class MotivationAnalyzer:
         self.surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
 
     async def analyze(self, player_id, match_id, surface, flag):
+        """Executes tactical analysis on match URL and updates confidence indices."""
         data_html = await self.fetch_player_activity(player_id, match_id)
         data = BeautifulSoup(data_html, "lxml")
 
@@ -47,6 +52,7 @@ class MotivationAnalyzer:
         await self.analyze_surface_performance(match_id, surface, flag)
 
     async def fetch_player_activity(self, player_id, match_id):
+        """Fetches player activity pane HTML from admin URL."""
         player_param = {
             "action": "playerActivity",
             "activityOffset": "0",
@@ -60,6 +66,7 @@ class MotivationAnalyzer:
 
     @staticmethod
     def get_tournament_category(data):
+        """Extracts tournament tier or category from activity table."""
         try:
             table = data.find(id="activity-table") if data else None
             if table:
@@ -72,21 +79,22 @@ class MotivationAnalyzer:
 
     @staticmethod
     def _get_year_index(show_class, year):
-        for i, item in enumerate(show_class):
+        for idx, item in enumerate(show_class):
             if str(year) in item.text:
-                return i + 1
+                return idx + 1
         return -1
 
     @staticmethod
     def _count_matches_in_year(show_class, start_index):
         count = 0
-        for i in range(start_index, len(show_class)):
-            if show_class[i].text == "Date":
+        for idx in range(start_index, len(show_class)):
+            if show_class[idx].text == "Date":
                 break
             count += 1
         return count
 
     def count_matches(self, data):
+        """Counts matches played by player in current season."""
         try:
             table = data.find(id="activity-table") if data else None
             if not table:
@@ -101,6 +109,7 @@ class MotivationAnalyzer:
             return -1
 
     def calculate_motivation_index(self, cat, nb_matchs, flag):
+        """Calculates motivation index based on tier and match count."""
         index = 2 * flag
         thresholds = {
             "250": (0, 2),
@@ -120,7 +129,7 @@ class MotivationAnalyzer:
                 matched = True
                 break
         if not matched:
-            # Fallback for unknown categories (e.g. "WTA Ch"): same logic as 250/500
+                # Fallback for unknown categories (e.g. "WTA Ch"): same logic as 250/500
             if nb_matchs < 0:
                 self.indice_tab[index] = 0
             elif nb_matchs < 2:
@@ -129,9 +138,12 @@ class MotivationAnalyzer:
                 self.indice_tab[index] = 100
 
     async def analyze_surface_performance(self, match_id, surface, flag):
+        """Analyzes surface performance rank and updates confidence indices."""
         self.indice_tab[2*flag+1] = await self.surface_analyzer.analyze(match_id, surface, flag)
 
 class TacticsAnalyzer:
+    """Analyzes tactical serving, returning, and tiebreak metrics from match stats."""
+
     def __init__(self, data_fetcher, admin_url, indice_tab):
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
@@ -139,6 +151,7 @@ class TacticsAnalyzer:
         self.stats_analyzer = MatchStatisticsAnalyzer()
 
     async def analyze(self, match_url, flag):
+        """Analyzes tactical serve, return, and tiebreak metrics from match stats."""
         match_id = self.extract_match_id(match_url)
         stats_match = await self.fetch_match_stats(match_id)
         serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
@@ -148,14 +161,17 @@ class TacticsAnalyzer:
 
     @staticmethod
     def extract_match_id(match_url):
+        """Extracts numeric match ID from match preview URL."""
         return match_url.split("match/")[1].split("/")[0]
 
     async def fetch_match_stats(self, match_id):
+        """Fetches match statistics pane HTML for match ID."""
         req = {"action": "showMatchStats", "matchID": match_id, "refresh": "true"}
         stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, req)
         return BeautifulSoup(stats_match_html, "lxml")
 
 async def indice_confiance(*args, match_url="", indice_tab=None, **kwargs):
+    """Main entry point for confidence index calculation across categories."""
     session = get_arg(args, 0, kwargs.get("session"))
     admin_url = get_arg(args, 1, kwargs.get("admin_url"))
     player_id = get_arg(args, 2, kwargs.get("player_id"))

@@ -21,13 +21,16 @@ import asyncio
 import aiohttp
 
 class MatchStatisticsProcessor:
+    """Processes historical match activity data and aggregates serve and return statistics."""
+
     def __init__(self, data_fetcher, stats_processor):
         self.data_fetcher = data_fetcher
         self.stats_processor = stats_processor
 
     async def process_match_statistics(
-        self, player_id, match_id, tour_now, activity_data=None
+            self, player_id, match_id, tour_now, activity_data=None
     ):
+        """Aggregates serve and return statistics across tournament matches."""
         if activity_data is not None:
             data = activity_data
         else:
@@ -49,6 +52,7 @@ class MatchStatisticsProcessor:
 
     @staticmethod
     def update_statistics(new_stats, current_stats, m_i, data):
+        """Updates cumulative match statistics with newly extracted metrics."""
         min_tour, per_first_serve, points_first_serve, per_save_bp = current_stats
         if new_stats:
             min_tour += new_stats[0]
@@ -58,6 +62,7 @@ class MatchStatisticsProcessor:
 
     @staticmethod
     def is_match_in_tournament(match, tour_now):
+        """Verifies if match belongs to current tournament."""
         if not tour_now or not getattr(match, "contents", None) or len(match.contents) < 2:
             return False
         href = match.contents[1].get("href", "") if hasattr(match.contents[1], "get") else ""
@@ -66,6 +71,7 @@ class MatchStatisticsProcessor:
         return clean_tour in href or (len(first_token) >= 4 and first_token in href)
 
     async def get_match_statistics(self, matches_list, m_i, *args, **kwargs):
+        """Fetches and processes individual match statistics safely."""
         try:
             return await self.stats_processor.process_match_statistics(
                 self.data_fetcher, matches_list, m_i

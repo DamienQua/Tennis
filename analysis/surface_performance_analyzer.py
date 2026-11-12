@@ -17,6 +17,8 @@ import aiohttp
 from bs4 import BeautifulSoup
 
 class SurfacePerformanceAnalyzer:
+    """Evaluates player win rates and relative performance rankings on specific court surfaces."""
+
     SURFACE_INDICES = {"Hard": 12, "Indoor Hard": 19, "Carpet": 26, "Clay": 33, "Grass": 40}
     _stats_cache = {}
 
@@ -25,6 +27,7 @@ class SurfacePerformanceAnalyzer:
         self.admin_url = admin_url
 
     async def fetch_statistics_html(self, match_id):
+        """Fetches lazy-loaded surface statistics pane HTML."""
         if match_id in SurfacePerformanceAnalyzer._stats_cache:
             return SurfacePerformanceAnalyzer._stats_cache[match_id]
         pane_req = {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id}
@@ -54,13 +57,14 @@ class SurfacePerformanceAnalyzer:
     def _calculate_surface_rank(tds, target_idx):
         win_sur = float(tds[target_idx].text.replace("%", "").replace("N/A", "0"))
         rank = 10
-        for j in range(12, min(len(tds), 41), 7):
-            val = float(tds[j].text.replace("%", "").replace("N/A", "0"))
+        for idx in range(12, min(len(tds), 41), 7):
+            val = float(tds[idx].text.replace("%", "").replace("N/A", "0"))
             if win_sur > val:
                 rank += 10
         return rank
 
     async def analyze(self, match_id, surface, flag):
+        """Computes relative surface ranking index for a player."""
         try:
             pane_req = {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id}
             stats_html = await self.data_fetcher.fetch_data(self.admin_url, pane_req)

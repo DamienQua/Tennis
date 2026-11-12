@@ -33,10 +33,10 @@ def _calc_raw_ev(prob: float, book_odds: float) -> float:
     return 0.0
 
 def _check_candidate(prob: float, book_odds: float, elo_diff: float) -> Tuple[bool, float]:
-    ev = _calc_raw_ev(prob, book_odds)
+    raw_ev = _calc_raw_ev(prob, book_odds)
     in_range = (1.40 <= book_odds <= 2.50)
-    meets_criteria = in_range and (ev > 0.03) and (elo_diff >= 150.0)
-    return meets_criteria, ev
+    meets_criteria = in_range and (raw_ev > 0.03) and (elo_diff >= 150.0)
+    return meets_criteria, raw_ev
 
 def _format_pct(val: float, is_valid: bool) -> str:
     if not is_valid:
@@ -49,10 +49,10 @@ def _format_diff(val: float, is_valid: bool) -> str:
     return f"{val:+0.0f}"
 
 def _build_bet_result(
-    player: str, index: int, odds: Tuple[float, float, float], metrics: Tuple[float, float]
+        player: str, index: int, odds: Tuple[float, float, float], metrics: Tuple[float, float]
 ) -> Dict[str, Any]:
     book, model, prob = odds
-    ev, elo_diff = metrics
+    exp_val, elo_diff = metrics
     return {
         "bet_recommended": True,
         "selected_player": player,
@@ -60,8 +60,8 @@ def _build_bet_result(
         "book_odds": book,
         "model_odds": model,
         "model_prob": prob,
-        "ev": ev,
-        "ev_percent": round(ev * 100, 2),
+        "ev": exp_val,
+        "ev_percent": round(exp_val * 100, 2),
         "elo_diff": elo_diff,
         "signal_j1": "PARI CONSEILLÉ" if index == 1 else "-",
         "signal_j2": "PARI CONSEILLÉ" if index == 2 else "-"
@@ -84,10 +84,10 @@ def _build_no_bet_result(data_valid: bool) -> Dict[str, Any]:
     }
 
 def _assemble_final_dict(
-    base: Dict[str, Any],
-    data_valid: bool,
-    ev_pair: Tuple[float, float],
-    diff_pair: Tuple[float, float]
+        base: Dict[str, Any],
+        data_valid: bool,
+        ev_pair: Tuple[float, float],
+        diff_pair: Tuple[float, float]
 ) -> Dict[str, Any]:
     ev_1, ev_2 = ev_pair
     diff_1, diff_2 = diff_pair
@@ -99,14 +99,15 @@ def _assemble_final_dict(
     return base
 
 def format_alpha_summary(res: Dict[str, Any]) -> str:
+    """Formats terminal summary string for Alpha 5+ strategy signal."""
     if res.get("bet_recommended"):
-        p = res["selected_player"]
-        b = res["book_odds"]
-        ev = res["ev_percent"]
+        player_name = res["selected_player"]
+        book_val = res["book_odds"]
+        exp_val = res["ev_percent"]
         diff = res["elo_diff"]
         return (
-            f"🎯 SIGNAL ALPHA 5+: Pari conseillé sur {p} @ {b:.2f} "
-            f"(EV: {ev:+.1f}%, ΔELO: {diff:+.0f})"
+            f"🎯 SIGNAL ALPHA 5+: Pari conseillé sur {player_name} @ {book_val:.2f} "
+            f"(EV: {exp_val:+.1f}%, ΔELO: {diff:+.0f})"
         )
     return (
         f"⚪ Stratégie Alpha 5+: Aucun signal "
@@ -116,37 +117,59 @@ def format_alpha_summary(res: Dict[str, Any]) -> str:
 def _is_valid_input(odds: Tuple[float, ...], elos: Tuple[float, ...]) -> bool:
     return (min(odds) > 1.01) and (min(elos) > 0)
 
-def evaluate_alpha_strategy(
-    *args,
-    player_1: str = "Joueur 1",
-    player_2: str = "Joueur 2",
-    **kwargs
-) -> Dict[str, Any]:
-    model_1 = get_arg(args, 0, kwargs.get("model_1", 0.0))
-    model_2 = get_arg(args, 1, kwargs.get("model_2", 0.0))
-    book_1 = get_arg(args, 2, kwargs.get("book_1", 0.0))
-    book_2 = get_arg(args, 3, kwargs.get("book_2", 0.0))
-    elo_1 = get_arg(args, 4, kwargs.get("elo_1", 0.0))
-    elo_2 = get_arg(args, 5, kwargs.get("elo_2", 0.0))
-    player_1 = get_arg(args, 6, kwargs.get("player_1", player_1))
-    player_2 = get_arg(args, 7, kwargs.get("player_2", player_2))
+def _extract_alpha_inputs(
+        args: tuple,
+        kwargs: dict,
+        default_p1: str,
+        default_p2: str
+) -> dict:
+    """Extracts and parses numeric and player inputs for Alpha strategy."""
+    return {
+        "models": (
+            _safe_float(get_arg(args, 0, kwargs.get("model_1", 0.0))),
+            _safe_float(get_arg(args, 1, kwargs.get("model_2", 0.0)))
+        ),
+        "books": (
+            _safe_float(get_arg(args, 2, kwargs.get("book_1", 0.0))),
+            _safe_float(get_arg(args, 3, kwargs.get("book_2", 0.0)))
+        ),
+        "elos": (
+            _safe_float(get_arg(args, 4, kwargs.get("elo_1", 0.0))),
+            _safe_float(get_arg(args, 5, kwargs.get("elo_2", 0.0)))
+        ),
+        "p1_name": get_arg(args, 6, kwargs.get("player_1", default_p1)),
+        "p2_name": get_arg(args, 7, kwargs.get("player_2", default_p2)),
+    }
 
-    m1, m2 = _safe_float(model_1), _safe_float(model_2)
-    b1, b2 = _safe_float(book_1), _safe_float(book_2)
-    e1, e2 = _safe_float(elo_1), _safe_float(elo_2)
-
-    data_valid = _is_valid_input((m1, m2, b1, b2), (e1, e2))
-    p1, p2 = _calculate_probabilities(m1, m2)
-    diff_1, diff_2 = e1 - e2, e2 - e1
-
-    ok_1, ev_1 = _check_candidate(p1, b1, diff_1)
-    ok_2, ev_2 = _check_candidate(p2, b2, diff_2)
-
-    if ok_1:
-        base = _build_bet_result(player_1, 1, (b1, m1, p1), (ev_1, diff_1))
-    elif ok_2:
-        base = _build_bet_result(player_2, 2, (b2, m2, p2), (ev_2, diff_2))
+def _evaluate_candidates(
+        inp: dict
+) -> Tuple[Dict[str, Any], bool, Tuple[float, float], Tuple[float, float]]:
+    """Evaluates bet candidates and computes odds and ELO differential."""
+    models, books, elos = inp["models"], inp["books"], inp["elos"]
+    data_valid = _is_valid_input((models[0], models[1], books[0], books[1]), elos)
+    probs = _calculate_probabilities(models[0], models[1])
+    diffs = (elos[0] - elos[1], elos[1] - elos[0])
+    cand_1 = _check_candidate(probs[0], books[0], diffs[0])
+    cand_2 = _check_candidate(probs[1], books[1], diffs[1])
+    if cand_1[0]:
+        base = _build_bet_result(
+            inp["p1_name"], 1, (books[0], models[0], probs[0]), (cand_1[1], diffs[0])
+        )
+    elif cand_2[0]:
+        base = _build_bet_result(
+            inp["p2_name"], 2, (books[1], models[1], probs[1]), (cand_2[1], diffs[1])
+        )
     else:
         base = _build_no_bet_result(data_valid)
+    return base, data_valid, (cand_1[1], cand_2[1]), diffs
 
-    return _assemble_final_dict(base, data_valid, (ev_1, ev_2), (diff_1, diff_2))
+def evaluate_alpha_strategy(
+        *args,
+        player_1: str = "Joueur 1",
+        player_2: str = "Joueur 2",
+        **kwargs
+) -> Dict[str, Any]:
+    """Evaluates Alpha 5+ value betting signal and returns recommendation."""
+    inp = _extract_alpha_inputs(args, kwargs, player_1, player_2)
+    base, data_valid, evs, diffs = _evaluate_candidates(inp)
+    return _assemble_final_dict(base, data_valid, evs, diffs)

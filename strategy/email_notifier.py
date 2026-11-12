@@ -46,26 +46,26 @@ def _build_subject(bets_count: int, date_str: str) -> str:
 
 def _build_table_rows(bets: List[Dict[str, Any]]) -> str:
     rows = []
-    for b in bets:
-        prob = f"{b.get('model_prob', 0.0) * 100:.1f}%"
-        ev = f"{b.get('ev_percent', 0.0):+.1f}%"
-        diff = f"{b.get('elo_diff', 0.0):+.0f}"
-        tourn = b.get('tournament', '')
-        surf = b.get('surface', '')
-        p1 = b.get('player1', '')
-        p2 = b.get('player2', '')
-        sel = b.get('selected_player', '')
+    for bet_item in bets:
+        prob = f"{bet_item.get('model_prob', 0.0) * 100:.1f}%"
+        exp_val = f"{bet_item.get('ev_percent', 0.0):+.1f}%"
+        diff = f"{bet_item.get('elo_diff', 0.0):+.0f}"
+        tourn = bet_item.get('tournament', '')
+        surf = bet_item.get('surface', '')
+        player1 = bet_item.get('player1', '')
+        player2 = bet_item.get('player2', '')
+        sel = bet_item.get('selected_player', '')
         rows.append(f"""
         <tr style="border-bottom: 1px solid #e0e0e0; text-align: center;">
             <td style="padding: 10px; text-align: left;"><b>{tourn}</b> ({surf})</td>
-            <td style="padding: 10px; text-align: left;">{p1} vs {p2}</td>
+            <td style="padding: 10px; text-align: left;">{player1} vs {player2}</td>
             <td style="padding: 10px; color: #2e7d32; font-weight: bold;
                 background-color: #e8f5e9;">
                 {sel}
             </td>
-            <td style="padding: 10px; font-weight: bold;">{b.get('book_odds', 0.0):.2f}</td>
-            <td style="padding: 10px;">{b.get('model_odds', 0.0):.2f} ({prob})</td>
-            <td style="padding: 10px; color: #2e7d32; font-weight: bold;">{ev}</td>
+            <td style="padding: 10px; font-weight: bold;">{bet_item.get('book_odds', 0.0):.2f}</td>
+            <td style="padding: 10px;">{bet_item.get('model_odds', 0.0):.2f} ({prob})</td>
+            <td style="padding: 10px; color: #2e7d32; font-weight: bold;">{exp_val}</td>
             <td style="padding: 10px;">{diff}</td>
         </tr>
         """)
@@ -132,12 +132,12 @@ def _attach_excel(msg: MIMEMultipart, filepath: str) -> None:
     if not os.path.exists(filepath):
         return
     try:
-        with open(filepath, "rb") as f:
-            part = MIMEApplication(f.read(), Name=os.path.basename(filepath))
+        with open(filepath, "rb") as file_handle:
+            part = MIMEApplication(file_handle.read(), Name=os.path.basename(filepath))
             part["Content-Disposition"] = f'attachment; filename="{os.path.basename(filepath)}"'
             msg.attach(part)
-    except OSError as e:
-        print(f"⚠️ Impossible d'attacher le fichier Excel {filepath}: {e}")
+    except OSError as err:
+        print(f"⚠️ Impossible d'attacher le fichier Excel {filepath}: {err}")
 
 def _dispatch_smtp(cfg: Dict[str, str], msg: MIMEMultipart) -> None:
     port = int(cfg["port"])
@@ -147,11 +147,12 @@ def _dispatch_smtp(cfg: Dict[str, str], msg: MIMEMultipart) -> None:
         server.send_message(msg)
 
 def send_daily_email(
-    bets: List[Dict[str, Any]],
-    total_matches: int = 0,
-    filepath: str = DEFAULT_TRACKING_FILE,
-    config: Optional[Dict[str, str]] = None
+        bets: List[Dict[str, Any]],
+        total_matches: int = 0,
+        filepath: str = DEFAULT_TRACKING_FILE,
+        config: Optional[Dict[str, str]] = None
 ) -> bool:
+    """Builds and sends daily summary email with attached selection report."""
     cfg = config or _load_smtp_config()
     if not _is_config_valid(cfg):
         msg_cfg = (
@@ -177,6 +178,6 @@ def send_daily_email(
         _dispatch_smtp(cfg, msg)
         print(f"📧 Email récapitulatif envoyé avec succès à {cfg['recipient']}")
         return True
-    except (smtplib.SMTPException, socket.error, OSError, TimeoutError) as e:
-        print(f"⚠️ Erreur lors de l'envoi de l'email : {e}")
+    except (smtplib.SMTPException, socket.error, OSError, TimeoutError) as err:
+        print(f"⚠️ Erreur lors de l'envoi de l'email : {err}")
         return False

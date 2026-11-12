@@ -46,11 +46,13 @@ def _safe_get(match_vs, index):
 
 def _prepare_match_data(match_vs, player1, player2):
     """Prepare the data structure for the Excel sheet."""
-    m1, m2 = _safe_get(match_vs, 36), _safe_get(match_vs, 37)
-    b1, b2 = _safe_get(match_vs, 38), _safe_get(match_vs, 39)
-    e1, e2 = _safe_get(match_vs, 40), _safe_get(match_vs, 41)
+    model_1, model_2 = _safe_get(match_vs, 36), _safe_get(match_vs, 37)
+    book_1, book_2 = _safe_get(match_vs, 38), _safe_get(match_vs, 39)
+    elo_1, elo_2 = _safe_get(match_vs, 40), _safe_get(match_vs, 41)
 
-    alpha = evaluate_alpha_strategy(m1, m2, b1, b2, e1, e2, player1, player2)
+    alpha = evaluate_alpha_strategy(
+        model_1, model_2, book_1, book_2, elo_1, elo_2, player1, player2
+    )
 
     return [
         ["", player1, player2],
@@ -74,11 +76,15 @@ def _prepare_match_data(match_vs, player1, player2):
         ["% points gagnés service", match_vs[23], match_vs[34]],
         ["% balles de break sauvées", match_vs[24], match_vs[35]],
         ["", "", ""],
-        ["Pourcentage victoire", _calculate_win_percentage(m1), _calculate_win_percentage(m2)],
+        [
+            "Pourcentage victoire",
+            _calculate_win_percentage(model_1),
+            _calculate_win_percentage(model_2)
+        ],
         ["", "", ""],
-        ["Côte estimée", m1, m2],
-        ["Cote Bookmaker", b1, b2],
-        ["Classement ELO", e1, e2],
+        ["Côte estimée", model_1, model_2],
+        ["Cote Bookmaker", book_1, book_2],
+        ["Classement ELO", elo_1, elo_2],
         ["", "", ""],
         ["STRATÉGIE ALPHA 5+", alpha["signal_j1"], alpha["signal_j2"]],
         ["Espérance de gain (EV)", alpha["ev_j1_str"], alpha["ev_j2_str"]],
@@ -123,7 +129,7 @@ def _apply_cell_borders(sheet):
     thin_border = _create_thin_border()
 
     for row in sheet.iter_rows(
-        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+            min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):
         for cell in row:
             cell.border = thin_border
@@ -141,7 +147,7 @@ def _apply_strategy_styling(sheet):
     bold_font = Font(bold=True)
 
     for row in sheet.iter_rows(
-        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+            min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):
         header = str(row[0].value or "")
         if "STRATÉGIE ALPHA 5+" in header:

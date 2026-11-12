@@ -15,6 +15,7 @@ class EloMatcher:
 
     @classmethod
     def get_player_elo(cls, player_line, match_player_name, surface):
+        """Looks up surface Elo rating for player name from Elo table string."""
         words = player_line.split(" ")
         is_num = lambda x: x.isdigit() or x.replace(".", "", 1).isdigit()
         player_vs = " ".join(takewhile(lambda x: not is_num(x), words))
@@ -35,6 +36,7 @@ class EloMatcher:
 
     @classmethod
     def find_elo_ratings(cls, elo_data, player_a_name, player_b_name, surface):
+        """Finds Elo ratings for both players on specified surface."""
         lines = elo_data.split("\n")
         elo_a = cls._find_rating_for_player(lines, player_a_name, surface)
         elo_b = cls._find_rating_for_player(lines, player_b_name, surface)
@@ -42,6 +44,7 @@ class EloMatcher:
 
     @staticmethod
     def extract_elo_rating(player_line, player_name, surface):
+        """Extracts numeric Elo rating from table row for specified surface."""
         tokens = player_line.replace("-", " ").split()
         if not tokens:
             return ""

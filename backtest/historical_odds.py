@@ -27,11 +27,11 @@ class HistoricalOddsProvider:
         if not os.path.exists(filepath):
             return pd.DataFrame()
 
-        df = pd.read_excel(filepath)
-        df["Winner_Clean"] = df["Winner"].astype(str).str.strip().str.lower()
-        df["Loser_Clean"] = df["Loser"].astype(str).str.strip().str.lower()
-        self._cache[key] = df
-        return df
+        data_frame = pd.read_excel(filepath)
+        data_frame["Winner_Clean"] = data_frame["Winner"].astype(str).str.strip().str.lower()
+        data_frame["Loser_Clean"] = data_frame["Loser"].astype(str).str.strip().str.lower()
+        self._cache[key] = data_frame
+        return data_frame
 
     @staticmethod
     def _name_matches(player_full_name: str, candidate_name: str) -> bool:
@@ -51,31 +51,38 @@ class HistoricalOddsProvider:
         return jaro.jaro_winkler_metric(p_clean, c_clean) >= 0.85
 
     def _find_match_row(
-        self, df: pd.DataFrame, player_a: str, player_b: str
+            self, data_frame: pd.DataFrame, player_a: str, player_b: str
     ) -> Optional[Tuple[pd.Series, bool]]:
         """Search DataFrame for a match between player_a and player_b.
         Returns (row, a_is_winner)."""
-        for _, row in df.iterrows():
-            w = str(row["Winner"])
-            l = str(row["Loser"])
-            if self._name_matches(player_a, w) and self._name_matches(player_b, l):
+        for _, row in data_frame.iterrows():
+            winner_name = str(row["Winner"])
+            loser_name = str(row["Loser"])
+            if (
+                self._name_matches(player_a, winner_name)
+                and self._name_matches(player_b, loser_name)
+            ):
                 return row, True
-            if self._name_matches(player_b, w) and self._name_matches(player_a, l):
+            if (
+                self._name_matches(player_b, winner_name)
+                and self._name_matches(player_a, loser_name)
+            ):
                 return row, False
         return None
 
     def get_match_odds(
-        self,
-        player_a: str,
-        player_b: str,
-        year: int,
-        gender: str = "atp"
+            self,
+            player_a: str,
+            player_b: str,
+            year: int,
+            gender: str = "atp"
     ) -> Optional[Dict[str, Any]]:
-        df = self._load_dataset(year, gender)
-        if df.empty:
+        """Looks up closing historical betting odds for two players."""
+        data_frame = self._load_dataset(year, gender)
+        if data_frame.empty:
             return None
 
-        found = self._find_match_row(df, player_a, player_b)
+        found = self._find_match_row(data_frame, player_a, player_b)
         if not found:
             return None
 
@@ -84,21 +91,21 @@ class HistoricalOddsProvider:
 
     @staticmethod
     def _extract_market_odds(row: pd.Series, prefix: str) -> Tuple[float, float]:
-        w = float(row.get(f"{prefix}W", 0.0) or 0.0)
-        l = float(row.get(f"{prefix}L", 0.0) or 0.0)
-        return w, l
+        win_odd = float(row.get(f"{prefix}W", 0.0) or 0.0)
+        loss_odd = float(row.get(f"{prefix}L", 0.0) or 0.0)
+        return win_odd, loss_odd
 
     @classmethod
     def _format_odds_dict(
-        cls, row: pd.Series, player_a: str, player_b: str, a_is_winner: bool
+            cls, row: pd.Series, player_a: str, player_b: str, a_is_winner: bool
     ) -> Dict[str, Any]:
         odds_w = {}
         odds_l = {}
         for book in ("B365", "PS", "Avg"):
-            w, l = cls._extract_market_odds(row, book)
+            win_odd, loss_odd = cls._extract_market_odds(row, book)
             key = book.lower()
-            odds_w[key] = w
-            odds_l[key] = l
+            odds_w[key] = win_odd
+            odds_l[key] = loss_odd
 
         odds_a = odds_w if a_is_winner else odds_l
         odds_b = odds_l if a_is_winner else odds_w

@@ -17,31 +17,35 @@ The main components are:
 from math import ceil
 
 class IndiceComparator:
+    """Compares confidence indices between two players across various categories."""
+
     def __init__(self, indice_tab):
         self.indice_tab = indice_tab
         self.comp = [0, 0, 0]
 
     def compare_indices(self):
+        """Executes comparisons across all confidence index categories."""
         self._compare_specific_indices()
         self._compare_range_indices()
         self.comp[2] = self.comp[0] + self.comp[1]
         return self.comp
 
     def _compare_specific_indices(self):
-        for k in (0, 1, 4, 20, 22):
-            if self.indice_tab[k] > self.indice_tab[k+1]:
+        for idx in (0, 1, 4, 20, 22):
+            if self.indice_tab[idx] > self.indice_tab[idx+1]:
                 self.comp[0] += 20
-            elif self.indice_tab[k] < self.indice_tab[k+1]:
+            elif self.indice_tab[idx] < self.indice_tab[idx+1]:
                 self.comp[1] += 20
 
     def _compare_range_indices(self):
-        for k in (6, 8, 10, 12, 14, 16, 18):
-            if self.indice_tab[k] > self.indice_tab[k+1]:
-                self.comp[0] += 5*ceil((self.indice_tab[k]-self.indice_tab[k+1])/10)
-            if self.indice_tab[k] < self.indice_tab[k+1]:
-                self.comp[1] += 5*ceil((self.indice_tab[k+1]-self.indice_tab[k])/10)
+        for idx in (6, 8, 10, 12, 14, 16, 18):
+            if self.indice_tab[idx] > self.indice_tab[idx+1]:
+                self.comp[0] += 5*ceil((self.indice_tab[idx]-self.indice_tab[idx+1])/10)
+            if self.indice_tab[idx] < self.indice_tab[idx+1]:
+                self.comp[1] += 5*ceil((self.indice_tab[idx+1]-self.indice_tab[idx])/10)
 
 def calculate_indice_24(comp, match_vs):
+    """Calculates weighted index 24 based on specific category differences."""
     if match_vs[36] < match_vs[37]:
         return _calculate_indice_24_helper(comp[0], comp[2])
     if match_vs[36] > match_vs[37]:
@@ -61,6 +65,7 @@ def _calculate_indice_24_helper(comp_value, comp_total):
     return 3
 
 def compare_indice(indice_tab, match_vs):
+    """Main entry point to compare confidence indices and update match vector."""
     comparator = IndiceComparator(indice_tab)
     comp = comparator.compare_indices()
     indice_tab[24] = calculate_indice_24(comp, match_vs)

@@ -1,12 +1,16 @@
 from datetime import datetime
 
 class DateUtils:
+    """Helper utilities for parsing dates and validating time windows in H2H analysis."""
+
     @staticmethod
     def parse_date(date_str):
+        """Parses date string into a timestamp."""
         return datetime.strptime(date_str.strip(), "%b %d %Y").timestamp()
 
     @staticmethod
     def is_within_last_year(date_ms):
+        """Checks if given timestamp occurred within the past year."""
         today = datetime.now().timestamp()
         year_ms = 365.25 * 24 * 3600
         return today - date_ms <= year_ms
@@ -20,6 +24,8 @@ class PlayerH2H:
         self.games = 0
 
 class H2HStats:
+    """Tracks and calculates head-to-head win percentages and game totals for two players."""
+
     def __init__(self, player_a, player_b):
         self.player_a = player_a
         self.player_b = player_b
@@ -30,69 +36,86 @@ class H2HStats:
 
     @property
     def win_a_all(self):
+        """Returns or updates player A all-time wins."""
         return self.p_a.wins_all
 
     @win_a_all.setter
     def win_a_all(self, val):
+        """Sets player A all-time wins."""
         self.p_a.wins_all = val
 
     @property
     def win_b_all(self):
+        """Returns or updates player B all-time wins."""
         return self.p_b.wins_all
 
     @win_b_all.setter
     def win_b_all(self, val):
+        """Sets player B all-time wins."""
         self.p_b.wins_all = val
 
     @property
     def win_a_y(self):
+        """Returns or updates player A past-year wins."""
         return self.p_a.wins_year
 
     @win_a_y.setter
     def win_a_y(self, val):
+        """Sets player A past-year wins."""
         self.p_a.wins_year = val
 
     @property
     def win_b_y(self):
+        """Returns or updates player B past-year wins."""
         return self.p_b.wins_year
 
     @win_b_y.setter
     def win_b_y(self, val):
+        """Sets player B past-year wins."""
         self.p_b.wins_year = val
 
     @property
     def win_a_sur(self):
+        """Returns or updates player A surface-specific wins."""
         return self.p_a.wins_surface
 
     @win_a_sur.setter
     def win_a_sur(self, val):
+        """Sets player A surface-specific wins."""
         self.p_a.wins_surface = val
 
     @property
     def win_b_sur(self):
+        """Returns or updates player B surface-specific wins."""
         return self.p_b.wins_surface
 
     @win_b_sur.setter
     def win_b_sur(self, val):
+        """Sets player B surface-specific wins."""
         self.p_b.wins_surface = val
 
     @property
     def win_a_g(self):
+        """Returns or updates player A games won count."""
         return self.p_a.games
 
     @win_a_g.setter
     def win_a_g(self, val):
+        """Sets player A games won count."""
         self.p_a.games = val
 
     @property
     def win_b_g(self):
+        """Returns or updates player B games won count."""
         return self.p_b.games
 
     @win_b_g.setter
     def win_b_g(self, val):
+        """Sets player B games won count."""
         self.p_b.games = val
 
     def update_stats(self, winner, date_ms, surface, score, current_surface):
+        """Updates head-to-head metrics based on an individual match outcome."""
         if winner in self.player_a:
             self._update_player_a_stats(date_ms, surface, score, current_surface)
         else:
@@ -125,6 +148,7 @@ class H2HStats:
                 pass
 
     def calculate_percentages(self):
+        """Calculates win percentages across all time, year, surface, and games."""
         return {
             "all_time": self._calculate_percentage(self.p_a.wins_all, self.p_b.wins_all),
             "last_year": self._calculate_percentage(self.p_a.wins_year, self.p_b.wins_year),

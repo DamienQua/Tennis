@@ -26,6 +26,7 @@ class EloFetcher:
 
     @classmethod
     async def fetch_data(cls, url: str, user_agent: str) -> str:
+        """Fetches Elo table web page asynchronously."""
         if url in cls.cache:
             return cls.cache[url]
         headers = {'User-Agent': user_agent}
@@ -40,6 +41,7 @@ _FETCH_CACHE = EloFetcher.cache
 fetch_data = EloFetcher.fetch_data
 
 async def elo_table(m_w: str) -> str:
+    """Retrieves and formats live Elo table for ATP or WTA circuit."""
     table = ""
     elo = ""
     user_agent = (
@@ -52,14 +54,12 @@ async def elo_table(m_w: str) -> str:
     soup = BeautifulSoup(content, 'lxml')
     tr_elements = soup.find_all("tr")[3:]
 
-    with open(f"{m_w}_ELO.txt", "w", encoding="utf-8") as f:
-        for tr in tr_elements:
-            td = tr.find_all("td")
-            name = td[1].text.replace("\xa0", " ")
-            table = f"{name} {td[6].text} {td[8].text} {td[10].text}\n"
-            f.write(table)
+    with open(f"{m_w}_ELO.txt", "w", encoding="utf-8") as file_handle:
+        for table_row in tr_elements:
+            table_cells = table_row.find_all("td")
+            name = table_cells[1].text.replace("\xa0", " ")
+            table = f"{name} {table_cells[6].text} {table_cells[8].text} {table_cells[10].text}\n"
+            file_handle.write(table)
             elo += table
 
     return elo
-
-ELO_table = elo_table

@@ -18,9 +18,11 @@ TRACKING_FILE = "Paris_Alpha_5_Plus.xlsx"
 SESSION_BETS: List[Dict[str, Any]] = []
 
 def get_session_bets() -> List[Dict[str, Any]]:
+    """Returns shallow copy of session recommended bets."""
     return list(SESSION_BETS)
 
 def clear_session_bets() -> None:
+    """Clears in-memory list of session recommended bets."""
     SESSION_BETS.clear()
 
 HEADERS = [
@@ -60,15 +62,15 @@ def _init_sheet(sheet):
 def _create_or_load_wb(filepath: str):
     if os.path.exists(filepath):
         try:
-            wb = openpyxl.load_workbook(filepath)
-            sheet = wb.active
-            return wb, sheet
+            workbook = openpyxl.load_workbook(filepath)
+            sheet = workbook.active
+            return workbook, sheet
         except (openpyxl.utils.exceptions.InvalidFileException, OSError, KeyError, ValueError):
             pass
-    wb = openpyxl.Workbook()
-    sheet = wb.active
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
     _init_sheet(sheet)
-    return wb, sheet
+    return workbook, sheet
 
 def _match_equals_url(row_url: str, clean_url: str) -> bool:
     return bool(clean_url and row_url and clean_url == row_url)
@@ -84,10 +86,10 @@ def _row_matches(row, clean_url: str, p1_l: str, p2_l: str) -> bool:
     row_url = str(row[-1] or "").strip().lower()
     return _match_equals_url(row_url, clean_url) or _match_equals_players(row, p1_l, p2_l)
 
-def _is_duplicate(sheet, match_url: str, p1: str, p2: str) -> bool:
+def _is_duplicate(sheet, match_url: str, player1: str, player2: str) -> bool:
     clean_url = (match_url or "").strip().lower()
-    p1_l = (p1 or "").strip().lower()
-    p2_l = (p2 or "").strip().lower()
+    p1_l = (player1 or "").strip().lower()
+    p2_l = (player2 or "").strip().lower()
 
     for row in sheet.iter_rows(min_row=2, values_only=True):
         if row and _row_matches(row, clean_url, p1_l, p2_l):
@@ -95,7 +97,7 @@ def _is_duplicate(sheet, match_url: str, p1: str, p2: str) -> bool:
     return False
 
 def _build_row(meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match_url: str):
-    tournament, surface, p1, p2 = meta
+    tournament, surface, player1, player2 = meta
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
     prob_str = f"{alpha_res.get('model_prob', 0.0) * 100:.1f}%"
     ev_str = f"{alpha_res.get('ev_percent', 0.0):+.1f}%"
@@ -105,8 +107,8 @@ def _build_row(meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match
         now_str,
         tournament,
         surface,
-        p1,
-        p2,
+        player1,
+        player2,
         alpha_res.get("selected_player", ""),
         alpha_res.get("book_odds", 0.0),
         alpha_res.get("model_odds", 0.0),
@@ -139,19 +141,19 @@ def _style_appended_row(sheet, row_idx: int):
 
 def _auto_fit_columns(sheet):
     for col in sheet.columns:
-        max_len = max(len(str(c.value or "")) for c in col)
+        max_len = max(len(str(cell.value or "")) for cell in col)
         col_letter = get_column_letter(col[0].column)
         sheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
 def _append_session_bet(
-    meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match_url: str
+        meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match_url: str
 ):
-    tournament, surface, p1, p2 = meta
+    tournament, surface, player1, player2 = meta
     SESSION_BETS.append({
         "tournament": tournament,
         "surface": surface,
-        "player1": p1,
-        "player2": p2,
+        "player1": player1,
+        "player2": player2,
         "selected_player": alpha_res.get("selected_player", ""),
         "book_odds": alpha_res.get("book_odds", 0.0),
         "model_odds": alpha_res.get("model_odds", 0.0),
@@ -162,33 +164,36 @@ def _append_session_bet(
     })
 
 def _extract_selection_args(args: tuple, kwargs: dict) -> Tuple[Any, ...]:
-    t = get_arg(args, 0, kwargs.get("tournament", ""))
-    s = get_arg(args, 1, kwargs.get("surface", ""))
-    p1 = get_arg(args, 2, kwargs.get("player1", ""))
-    p2 = get_arg(args, 3, kwargs.get("player2", ""))
+    tour = get_arg(args, 0, kwargs.get("tournament", ""))
+    surf = get_arg(args, 1, kwargs.get("surface", ""))
+    player1 = get_arg(args, 2, kwargs.get("player1", ""))
+    player2 = get_arg(args, 3, kwargs.get("player2", ""))
     res = get_arg(args, 4, kwargs.get("alpha_res", {}))
     url = kwargs.get("match_url", get_arg(args, 5, ""))
     path = kwargs.get("filepath", get_arg(args, 6, TRACKING_FILE))
-    return t, s, p1, p2, res, url, path
+    return tour, surf, player1, player2, res, url, path
 
 def record_alpha_selection(
-    *args,
-    match_url: str = "",
-    filepath: str = TRACKING_FILE,
-    **kwargs
+        *args,
+        match_url: str = "",
+        filepath: str = TRACKING_FILE,
+        **kwargs
 ) -> bool:
+    """Persists Alpha 5+ recommended bet to cumulative Excel workbook."""
     kwargs.setdefault("match_url", match_url)
     kwargs.setdefault("filepath", filepath)
-    tournament, surface, p1, p2, alpha_res, url, path = _extract_selection_args(args, kwargs)
+    tournament, surface, player1, player2, alpha_res, url, path = _extract_selection_args(
+        args, kwargs
+    )
 
     if not alpha_res.get("bet_recommended"):
         return False
 
-    meta = (tournament, surface, p1, p2)
+    meta = (tournament, surface, player1, player2)
     _append_session_bet(meta, alpha_res, url)
-    wb, sheet = _create_or_load_wb(path)
+    workbook, sheet = _create_or_load_wb(path)
 
-    if _is_duplicate(sheet, url, p1, p2):
+    if _is_duplicate(sheet, url, player1, player2):
         return False
 
     row_data = _build_row(meta, alpha_res, url)
@@ -196,6 +201,6 @@ def record_alpha_selection(
     _style_appended_row(sheet, sheet.max_row)
     _auto_fit_columns(sheet)
 
-    wb.save(path)
+    workbook.save(path)
     print(f"  💾 Sélection sauvegardée dans '{path}' (Ligne {sheet.max_row})")
     return True

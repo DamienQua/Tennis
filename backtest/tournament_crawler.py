@@ -20,16 +20,18 @@ class TournamentCrawler:
 
     @classmethod
     def is_major_tournament(cls, tour_name: str) -> bool:
+        """Checks if tournament category matches primary circuit criteria."""
         t_low = f" {tour_name.lower()} "
         if any(exc in t_low for exc in cls.EXCLUDED_CATEGORIES):
             return False
         return any(cat in t_low for cat in cls.VALID_CATEGORIES)
 
     async def fetch_tournaments(
-        self,
-        session: aiohttp.ClientSession,
-        year: int
+            self,
+            session: aiohttp.ClientSession,
+            year: int
     ) -> List[Dict[str, str]]:
+        """Fetches tournament directory and lists tournament URLs."""
         payload = {
             "action": "searchTournaments",
             "tournament_search_name": "",
@@ -40,19 +42,20 @@ class TournamentCrawler:
 
         soup = BeautifulSoup(html, "lxml")
         results = []
-        for a in soup.find_all("a", href=True):
-            if "/tournament/" in a["href"]:
-                name = a.text.strip()
+        for link_elem in soup.find_all("a", href=True):
+            if "/tournament/" in link_elem["href"]:
+                name = link_elem.text.strip()
                 if self.is_major_tournament(name):
-                    tid = a["href"].split("/tournament/")[1].split("/")[0]
-                    results.append({"id": tid, "name": name, "url": a["href"]})
+                    tid = link_elem["href"].split("/tournament/")[1].split("/")[0]
+                    results.append({"id": tid, "name": name, "url": link_elem["href"]})
         return results
 
     async def fetch_tournament_matches(
-        self,
-        session: aiohttp.ClientSession,
-        tournament_id: str
+            self,
+            session: aiohttp.ClientSession,
+            tournament_id: str
     ) -> List[str]:
+        """Fetches all match preview URLs for a tournament ID."""
         payload = {
             "action": "lazyLoadPanes",
             "pane": "results",
@@ -64,8 +67,8 @@ class TournamentCrawler:
         soup = BeautifulSoup(html, "lxml")
         seen = set()
         matches = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
+        for link_elem in soup.find_all("a", href=True):
+            href = link_elem["href"]
             if "/match/" in href and href not in seen:
                 seen.add(href)
                 matches.append(href)

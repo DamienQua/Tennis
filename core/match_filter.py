@@ -19,19 +19,23 @@ class MatchFilter:
 
     @classmethod
     def is_valid_season(cls, match_url):
+        """Checks if match URL corresponds to current season year."""
         year = str(datetime.now().year)
         return year in match_url or str(int(year) + 1) in match_url
 
     @classmethod
     def is_valid_circuit(cls, match_url):
+        """Checks if match URL belongs to ATP or WTA tour."""
         return any(sub in match_url for sub in cls.VALID_CIRCUITS)
 
     @classmethod
     def is_special_case(cls, match_url):
+        """Identifies whether URL matches designated special player case."""
         return any(name in match_url for name in cls.SPECIAL_PLAYERS)
 
     @classmethod
     def should_process(cls, match_url, already_processed=""):
+        """Determines whether match URL satisfies processing and exclusion rules."""
         if any(pattern in match_url for pattern in cls.EXCLUDED_PATTERNS):
             return False
 

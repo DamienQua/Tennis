@@ -19,6 +19,8 @@ from analysis.indice_confiance import indice_confiance
 from analysis.h2h_stats import H2HStats, DateUtils
 
 class MatchContext:
+    """Carries contextual HTTP and match metadata for head-to-head processing."""
+
     def __init__(self, surface, admin_url, header, match_id):
         self.surface = surface
         self.admin_url = admin_url
@@ -26,6 +28,8 @@ class MatchContext:
         self.match_id = match_id
 
 class H2HDataProcessor:
+    """Parses raw HTML head-to-head match rows and updates match stats accordingly."""
+
     def __init__(self, data, match_vs):
         self.data = data
         self.match_vs = match_vs
@@ -34,6 +38,7 @@ class H2HDataProcessor:
         self.flag = 0
 
     def process_h2h_data(self):
+        """Processes total matches, individual encounters, and win percentages."""
         self._process_h2h_count()
         self._process_h2h_matches()
         self._calculate_percentages()
@@ -45,10 +50,10 @@ class H2HDataProcessor:
 
         ind = 1 if "tied" in self.data.text else 0
 
-        for i in range(2):
+        for idx in range(2):
             try:
                 split_series = self.data.text.strip().split("series ")[1]
-                val = split_series.split(" ")[ind].split("-")[i].split("\n")[0]
+                val = split_series.split(" ")[ind].split("-")[idx].split("\n")[0]
                 self.stats.h2h_nb += int(val)
             except (IndexError, ValueError):
                 pass
@@ -57,14 +62,14 @@ class H2HDataProcessor:
             self.match_vs[6:14] = [0] * 8
 
     @staticmethod
-    def _extract_match_details(tr):
+    def _extract_match_details(row_elem):
         """Extract details from a match row."""
-        date_ms = DateUtils.parse_date(tr.text.strip().split("\t")[0].strip())
-        surface_m = tr.text.strip().split("\n")[5].strip().split(",")[0]
-        raw_winner = tr.text.strip().split("\n")[7].strip()
+        date_ms = DateUtils.parse_date(row_elem.text.strip().split("\t")[0].strip())
+        surface_m = row_elem.text.strip().split("\n")[5].strip().split(",")[0]
+        raw_winner = row_elem.text.strip().split("\n")[7].strip()
         winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
         try:
-            raw_score = tr.text.strip().split("\n")[9].strip()
+            raw_score = row_elem.text.strip().split("\n")[9].strip()
             score = (
                 re.sub(r"[\(\[].*?[\)\]]", "", raw_score)
                 .replace("ret.", " ")
@@ -75,10 +80,10 @@ class H2HDataProcessor:
             score = "0-0 0-0"
         return date_ms, surface_m, winner, score
 
-    def _update_go_flag(self, tr, surface_m, winner):
+    def _update_go_flag(self, row_elem, surface_m, winner):
         """Update the 'go' and 'flag' attributes if conditions are met."""
-        if self.go == "" and surface_m in tr.text:
-            self.go = tr.find_all("a")[-1]["href"]
+        if self.go == "" and surface_m in row_elem.text:
+            self.go = row_elem.find_all("a")[-1]["href"]
             self.flag = 0 if winner == self.match_vs[2] else 1
 
     def _process_h2h_matches(self):
@@ -88,10 +93,10 @@ class H2HDataProcessor:
             return
         h2h_tr = h2h_elem.find_all("tr")[1:]
         surface = self.match_vs[1]
-        for tr in h2h_tr:
-            date_ms, surface_m, winner, score = self._extract_match_details(tr)
+        for row_elem in h2h_tr:
+            date_ms, surface_m, winner, score = self._extract_match_details(row_elem)
             self.stats.update_stats(winner, date_ms, surface_m, score, surface)
-            self._update_go_flag(tr, surface_m, winner)
+            self._update_go_flag(row_elem, surface_m, winner)
 
     def _calculate_percentages(self):
         percentages = self.stats.calculate_percentages()
@@ -101,6 +106,7 @@ class H2HDataProcessor:
         )
 
 async def h2h_table(data, match_vs, session, match_context: MatchContext, indice_tab=None):
+    """Extracts H2H records from HTML and updates confidence index array."""
     if indice_tab is None:
         from utils.variables import indice_tab as default_tab
         indice_tab = default_tab

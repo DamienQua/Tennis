@@ -13,13 +13,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from strategy.alpha_strategy import evaluate_alpha_strategy
 
 class BetRecord:
+    """Stores betting prediction parameters, market odds, resolution, and P&L."""
+
     def __init__(
-        self,
-        match_name: str,
-        tournament: str,
-        bet_on: str,
-        *args,
-        **kwargs
+            self,
+            match_name: str,
+            tournament: str,
+            bet_on: str,
+            *args,
+            **kwargs
     ):
         self.match_name = match_name
         self.tournament = tournament
@@ -31,11 +33,13 @@ class BetRecord:
 
     @property
     def pnl(self) -> float:
+        """Calculates profit and loss for this bet record."""
         if self.won:
             return round(self.stake * (self.market_odds - 1), 2)
         return -round(self.stake, 2)
 
     def to_dict(self) -> Dict[str, Any]:
+        """Converts bet record to dictionary representation."""
         return {
             "match": self.match_name,
             "tournament": self.tournament,
@@ -71,16 +75,17 @@ class StrategyEvaluator:
 
     @staticmethod
     def _is_ok_j1(*args, **kwargs) -> bool:
-        ej1, ej2, bj1, bj2, el1, el2, s1, s2 = _parse_confluence_metrics(args)
-        return ej1 < ej2 and bj1 < bj2 and el1 > el2 and s1 > s2 and bj1 > ej1
+        ej1, ej2, bj1, bj2, el1, el2, surf_1, surf_2 = _parse_confluence_metrics(args)
+        return ej1 < ej2 and bj1 < bj2 and el1 > el2 and surf_1 > surf_2 and bj1 > ej1
 
     @staticmethod
     def _is_ok_j2(*args, **kwargs) -> bool:
-        ej1, ej2, bj1, bj2, el1, el2, s1, s2 = _parse_confluence_metrics(args)
-        return ej1 > ej2 and bj1 > bj2 and el1 < el2 and s1 < s2 and bj2 > ej2
+        ej1, ej2, bj1, bj2, el1, el2, surf_1, surf_2 = _parse_confluence_metrics(args)
+        return ej1 > ej2 and bj1 > bj2 and el1 < el2 and surf_1 < surf_2 and bj2 > ej2
 
     @classmethod
     def evaluate_confluence(cls, *args, **kwargs) -> str:
+        """Evaluates user model confluence criteria across players."""
         if cls._is_ok_j1(*args, **kwargs):
             return "OK J1"
         if cls._is_ok_j2(*args, **kwargs):
@@ -89,10 +94,12 @@ class StrategyEvaluator:
 
     @classmethod
     def evaluate_alpha_5_plus(cls, *args, **kwargs) -> Dict[str, Any]:
+        """Evaluates Alpha 5+ value betting criteria for a match."""
         return evaluate_alpha_strategy(*args, **kwargs)
 
     @classmethod
     def evaluate_optimized_confluence(cls, *args, surface: str = "Clay", **kwargs) -> str:
+        """Evaluates optimized confluence strategy with surface thresholds."""
         s_clean = surface.lower()
         if "grass" in s_clean:
             return "PAS OK"
@@ -116,6 +123,7 @@ class StrategyEvaluator:
         return "PAS OK"
 
     def evaluate_match_confluence(self, *args, **kwargs) -> Any:
+        """Evaluates confluence and appends winning bet record if signal met."""
         player_a = args[0]
         player_b = args[1]
         tournament = args[2]
@@ -169,13 +177,14 @@ class StrategyEvaluator:
         return None
 
     def get_summary(self) -> Dict[str, Any]:
+        """Computes aggregate backtest betting metrics including win rate and ROI."""
         total_bets = len(self.bets)
         if total_bets == 0:
             return {"total_bets": 0, "win_rate": 0.0, "total_pnl": 0.0, "roi": 0.0}
 
-        wins = sum(1 for b in self.bets if b.won)
-        total_staked = sum(b.stake for b in self.bets)
-        total_pnl = round(sum(b.pnl for b in self.bets), 2)
+        wins = sum(1 for bet_item in self.bets if bet_item.won)
+        total_staked = sum(bet_item.stake for bet_item in self.bets)
+        total_pnl = round(sum(bet_item.pnl for bet_item in self.bets), 2)
         roi = round((total_pnl / total_staked) * 100, 2) if total_staked > 0 else 0.0
         win_rate = round((wins / total_bets) * 100, 2)
 

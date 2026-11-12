@@ -54,6 +54,7 @@ class FastEloMatcher:
                 self.exact_lookup[f"{surname.replace('-', ' ')}_{init}"] = ratings
 
     def get_elo(self, player_archive_name: str, surface: str) -> float:
+        """Returns historical Elo rating for player prior to match date."""
         cache_key = (player_archive_name, surface)
         if cache_key in self.cache:
             return self.cache[cache_key]
@@ -86,17 +87,17 @@ class FastEloMatcher:
         )
 
     def _fuzzy_lookup_rating(self, p_clean: str, surface: str) -> float:
-        for full_name, r in self.raw_lines:
+        for full_name, rating_tuple in self.raw_lines:
             if jaro.jaro_winkler_metric(p_clean, full_name) >= 0.85:
-                return self._select_surface_rating(r, surface)
+                return self._select_surface_rating(rating_tuple, surface)
         return 1500.0
 
     @staticmethod
     def _select_surface_rating(ratings: Tuple[float, float, float], surface: str) -> float:
-        s = surface.lower()
-        if "clay" in s:
+        surf_lower = surface.lower()
+        if "clay" in surf_lower:
             return ratings[1]
-        if "grass" in s:
+        if "grass" in surf_lower:
             return ratings[2]
         return ratings[0]
 
@@ -109,25 +110,25 @@ class PointInTimeStats:
 
     def _build_index(self, matches_df: pd.DataFrame) -> None:
         for _, row in matches_df.iterrows():
-            d = pd.to_datetime(row["Date"])
-            s = str(row.get("Surface", "")).strip().lower()
-            w = str(row.get("Winner", "")).strip().lower()
-            l = str(row.get("Loser", "")).strip().lower()
-            if w:
-                if w not in self.player_history:
-                    self.player_history[w] = []
-                self.player_history[w].append((d, s, True))
-            if l:
-                if l not in self.player_history:
-                    self.player_history[l] = []
-                self.player_history[l].append((d, s, False))
+            match_date = pd.to_datetime(row["Date"])
+            surface_name = str(row.get("Surface", "")).strip().lower()
+            winner_name = str(row.get("Winner", "")).strip().lower()
+            loser_name = str(row.get("Loser", "")).strip().lower()
+            if winner_name:
+                if winner_name not in self.player_history:
+                    self.player_history[winner_name] = []
+                self.player_history[winner_name].append((match_date, surface_name, True))
+            if loser_name:
+                if loser_name not in self.player_history:
+                    self.player_history[loser_name] = []
+                self.player_history[loser_name].append((match_date, surface_name, False))
 
     @staticmethod
     def _tally_history(
-        history: List[Tuple[pd.Timestamp, str, bool]],
-        match_date: pd.Timestamp,
-        date_12m: pd.Timestamp,
-        surf_clean: str
+            history: List[Tuple[pd.Timestamp, str, bool]],
+            match_date: pd.Timestamp,
+            date_12m: pd.Timestamp,
+            surf_clean: str
     ) -> Tuple[int, int, int, int]:
         w_12m, tot_12m = 0, 0
         w_surf, tot_surf = 0, 0
@@ -143,10 +144,10 @@ class PointInTimeStats:
         return w_12m, tot_12m, w_surf, tot_surf
 
     def get_player_stats_before(
-        self,
-        player_name: str,
-        match_date: pd.Timestamp,
-        surface: str
+            self,
+            player_name: str,
+            match_date: pd.Timestamp,
+            surface: str
     ) -> Tuple[float, float, int]:
         """Compute rolling 12-month win %, surface win %, and match count before match_date."""
         p_clean = player_name.strip().lower()
@@ -170,10 +171,10 @@ class PointInTimeBacktester:
     """Executes chronologically pure backtesting on historical match datasets."""
 
     def __init__(
-        self,
-        data_dir: str = "backtest/data",
-        evaluator: Optional[StrategyEvaluator] = None,
-        output_dir: str = "backtest/results"
+            self,
+            data_dir: str = "backtest/data",
+            evaluator: Optional[StrategyEvaluator] = None,
+            output_dir: str = "backtest/results"
     ):
         self.data_dir = data_dir
         self.evaluator = evaluator or StrategyEvaluator()
@@ -188,8 +189,8 @@ class PointInTimeBacktester:
             filename = f"{gender}_{year}.xlsx"
             filepath = os.path.join(self.data_dir, filename)
             if os.path.exists(filepath):
-                df = pd.read_excel(filepath)
-                dfs.append(df)
+                frame = pd.read_excel(filepath)
+                dfs.append(frame)
         if not dfs:
             return pd.DataFrame()
         combined = pd.concat(dfs, ignore_index=True)
@@ -199,38 +200,38 @@ class PointInTimeBacktester:
         return combined
 
     @staticmethod
-    def _estimate_model_odds(*args, **kwargs) -> Tuple[float, float]:
-        """Estimate model odds based on player surface %, ranking, and recent form."""
-        surf_a = args[0]
-        surf_b = args[1]
-        rank_a = args[2]
-        rank_b = args[3]
-        form_a = args[4]
-        form_b = args[5]
-        # Score components (60% surface/form, 40% ranking ratio)
+    def _calculate_score_a(
+            surf_a: float,
+            surf_b: float,
+            rank_a: float,
+            rank_b: float,
+            form_a: float,
+            form_b: float
+    ) -> float:
+        """Calculates win probability score component for player A."""
         diff_surf = (surf_a - surf_b) * 0.4
         diff_form = (form_a - form_b) * 0.3
-
-        # Ranking factor (lower rank is better)
         r_a = max(1.0, rank_a if rank_a > 0 else 200.0)
         r_b = max(1.0, rank_b if rank_b > 0 else 200.0)
         diff_rank = (r_b - r_a) / max(r_a, r_b) * 30.0
-
         score_a = 50.0 + diff_surf + diff_form + diff_rank
-        score_a = max(5.0, min(95.0, score_a))
-        score_b = 100.0 - score_a
+        return max(5.0, min(95.0, score_a))
 
-        # 90% payout model (same TRJ as project)
-        odds_a = round(90.0 / score_a, 2)
-        odds_b = round(90.0 / score_b, 2)
-        return odds_a, odds_b
+    @staticmethod
+    def _estimate_model_odds(*args, **kwargs) -> Tuple[float, float]:
+        """Estimate model odds based on player surface %, ranking, and recent form."""
+        score_a = PointInTimeBacktest._calculate_score_a(
+            args[0], args[1], args[2], args[3], args[4], args[5]
+        )
+        return round(90.0 / score_a, 2), round(90.0 / (100.0 - score_a), 2)
 
     def run_backtest_for_year(
-        self,
-        year: int,
-        gender: str,
-        elo_data: str
+            self,
+            year: int,
+            gender: str,
+            elo_data: str
     ) -> Dict[str, Any]:
+        """Executes point-in-time backtest across all matches of a season."""
         combined_df = self._load_historical_dataset(gender)
         filepath = os.path.join(self.data_dir, f"{gender}_{year}.xlsx")
         if combined_df.empty or not os.path.exists(filepath):
@@ -302,58 +303,72 @@ class PointInTimeBacktester:
             "pnl": getattr(bet, "pnl", 0.0)
         }
 
-    def _process_single_row(
-        self,
-        row: pd.Series,
-        stats_engine: PointInTimeStats,
-        elo_matcher: FastEloMatcher
-    ) -> None:
-        p_w = str(row["Winner"])
-        p_l = str(row["Loser"])
+    def _extract_row_features(
+            self,
+            row: pd.Series,
+            stats_engine: PointInTimeStats,
+            elo_matcher: FastEloMatcher
+    ) -> dict:
+        """Extracts stats and odds features for a single match row."""
+        p_w, p_l = str(row["Winner"]), str(row["Loser"])
         match_date = pd.to_datetime(row["Date"])
         surface = str(row.get("Surface", "Hard"))
         tour = str(row.get("Tournament", ""))
-
         form_w, surf_w, _ = stats_engine.get_player_stats_before(p_w, match_date, surface)
         form_l, surf_l, _ = stats_engine.get_player_stats_before(p_l, match_date, surface)
-
-        rank_w = self._get_val(row, "WRank")
-        rank_l = self._get_val(row, "LRank")
-
-        odds_w_model, odds_l_model = self._estimate_model_odds(
-            surf_w, surf_l, rank_w, rank_l, form_w, form_l
-        )
-
-        # Market closing odds (Pinnacle preferred, Bet365 fallback)
-        book_w = self._get_val(row, "PSW", "B365W")
-        book_l = self._get_val(row, "PSL", "B365L")
-
-        elo_w = elo_matcher.get_elo(p_w, surface)
-        elo_l = elo_matcher.get_elo(p_l, surface)
-
-        bet = self.evaluator.evaluate_match_confluence(
-            p_w, p_l, tour, odds_w_model, odds_l_model,
-            book_w, book_l, elo_w, elo_l, surf_w, surf_l, p_w
-        )
-
-        status = self.evaluator.evaluate_confluence(
-            odds_w_model, odds_l_model, book_w, book_l, elo_w, elo_l, surf_w, surf_l
-        )
-
-        info = {
-            "date": match_date.strftime("%Y-%m-%d"),
-            "tour": tour,
+        return {
+            "p_w": p_w,
+            "p_l": p_l,
+            "match_date": match_date,
             "surface": surface,
-            "winner": p_w,
-            "loser": p_l
+            "tour": tour,
+            "surf_w": surf_w,
+            "surf_l": surf_l,
+            "form_w": form_w,
+            "form_l": form_l,
+            "rank_w": self._get_val(row, "WRank"),
+            "rank_l": self._get_val(row, "LRank"),
+            "book_w": self._get_val(row, "PSW", "B365W"),
+            "book_l": self._get_val(row, "PSL", "B365L"),
+            "elo_w": elo_matcher.get_elo(p_w, surface),
+            "elo_l": elo_matcher.get_elo(p_l, surface)
+        }
+
+    def _process_single_row(
+            self,
+            row: pd.Series,
+            stats_engine: PointInTimeStats,
+            elo_matcher: FastEloMatcher
+    ) -> None:
+        """Processes a single completed match row within backtest simulation."""
+        features = self._extract_row_features(row, stats_engine, elo_matcher)
+        odds_w, odds_l = self._estimate_model_odds(
+            features["surf_w"], features["surf_l"], features["rank_w"],
+            features["rank_l"], features["form_w"], features["form_l"]
+        )
+        bet = self.evaluator.evaluate_match_confluence(
+            features["p_w"], features["p_l"], features["tour"], odds_w, odds_l,
+            features["book_w"], features["book_l"], features["elo_w"],
+            features["elo_l"], features["surf_w"], features["surf_l"], features["p_w"]
+        )
+        status = self.evaluator.evaluate_confluence(
+            odds_w, odds_l,
+            features["book_w"], features["book_l"],
+            features["elo_w"], features["elo_l"],
+            features["surf_w"], features["surf_l"]
+        )
+        info = {
+            "date": features["match_date"].strftime("%Y-%m-%d"),
+            "tour": features["tour"], "surface": features["surface"],
+            "winner": features["p_w"], "loser": features["p_l"]
         }
         self.records.append(
             self._build_record(
                 info,
-                (odds_w_model, odds_l_model),
-                (book_w, book_l),
-                (elo_w, elo_l),
-                (surf_w, surf_l),
+                (odds_w, odds_l),
+                (features["book_w"], features["book_l"]),
+                (features["elo_w"], features["elo_l"]),
+                (features["surf_w"], features["surf_l"]),
                 status,
                 bet
             )
@@ -364,7 +379,7 @@ class PointInTimeBacktester:
         with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
             pd.DataFrame([summary]).to_excel(writer, sheet_name="Summary", index=False)
             if self.evaluator.bets:
-                bets_data = [b.to_dict() for b in self.evaluator.bets]
+                bets_data = [bet_item.to_dict() for bet_item in self.evaluator.bets]
                 pd.DataFrame(bets_data).to_excel(writer, sheet_name="Bets", index=False)
             if self.records:
                 pd.DataFrame(self.records).to_excel(writer, sheet_name="AllMatches", index=False)

@@ -15,8 +15,8 @@ class MatchRepository:
     def load_reviewed_matches(self):
         """Read the list of all matches reviewed so far."""
         try:
-            with open(self.reviewed_file, "r", encoding="utf-8") as f:
-                return f.read()
+            with open(self.reviewed_file, "r", encoding="utf-8") as file_handle:
+                return file_handle.read()
         except OSError:
             return ""
 

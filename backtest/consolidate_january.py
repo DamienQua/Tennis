@@ -19,30 +19,30 @@ from backtest.backtest_engine import BacktestResult, BacktestEngine, print_backt
 from data_providers.elo_matcher import EloMatcher
 from data_providers.ELO_table import elo_table
 
-def _extract_match_data(ws: Any) -> Optional[Dict[str, Any]]:
-    p1 = ws.cell(1, 2).value
-    p2 = ws.cell(1, 3).value
-    if not p1 or not p2:
+def _extract_match_data(worksheet: Any) -> Optional[Dict[str, Any]]:
+    player1 = worksheet.cell(1, 2).value
+    player2 = worksheet.cell(1, 3).value
+    if not player1 or not player2:
         return None
     return {
-        "p1": str(p1),
-        "p2": str(p2),
-        "surf_1": float(ws.cell(4, 2).value or 0.0),
-        "surf_2": float(ws.cell(4, 3).value or 0.0),
-        "odds_1": float(ws.cell(24, 2).value or 0.0),
-        "odds_2": float(ws.cell(24, 3).value or 0.0),
+        "p1": str(player1),
+        "p2": str(player2),
+        "surf_1": float(worksheet.cell(4, 2).value or 0.0),
+        "surf_2": float(worksheet.cell(4, 3).value or 0.0),
+        "odds_1": float(worksheet.cell(24, 2).value or 0.0),
+        "odds_2": float(worksheet.cell(24, 3).value or 0.0),
     }
 
 def _process_file(
-    filepath: str,
-    tour_name: str,
-    gender: str,
-    elo_data: str,
-    engine: BacktestEngine
+        filepath: str,
+        tour_name: str,
+        gender: str,
+        elo_data: str,
+        engine: BacktestEngine
 ) -> None:
     try:
-        wb = openpyxl.load_workbook(filepath, data_only=True)
-        data = _extract_match_data(wb.active)
+        workbook = openpyxl.load_workbook(filepath, data_only=True)
+        data = _extract_match_data(workbook.active)
         if not data:
             return
 
@@ -68,10 +68,10 @@ def _process_file(
         pass
 
 def _process_tournament(
-    tour_dir: str,
-    atp_elo: str,
-    wta_elo: str,
-    engine: BacktestEngine
+        tour_dir: str,
+        atp_elo: str,
+        wta_elo: str,
+        engine: BacktestEngine
 ) -> int:
     tour_name = os.path.basename(tour_dir).replace("_", " ")
     gender = "wta" if "wta" in tour_name.lower() else "atp"
@@ -84,8 +84,12 @@ def _process_tournament(
     return len(xlsx_files)
 
 async def consolidate_january():
+    """Consolidates January 2023 tournament backtests into single report."""
     base_dir = "Matchs/2023/January"
-    tour_folders = [f for f in glob.glob(os.path.join(base_dir, "*")) if os.path.isdir(f)]
+    tour_folders = [
+        folder for folder in glob.glob(os.path.join(base_dir, "*"))
+        if os.path.isdir(folder)
+    ]
 
     odds_provider = HistoricalOddsProvider()
     evaluator = StrategyEvaluator()
@@ -96,7 +100,9 @@ async def consolidate_january():
     atp_elo, wta_elo = await asyncio.gather(elo_table("ATP"), elo_table("WTA"))
     print(f"Consolidating backtest results from {len(tour_folders)} tournaments...")
 
-    total_files = sum(_process_tournament(td, atp_elo, wta_elo, engine) for td in tour_folders)
+    total_files = sum(
+        _process_tournament(tour_dir, atp_elo, wta_elo, engine) for tour_dir in tour_folders
+    )
 
     summary = engine.evaluator.get_summary()
     saved_path = engine.export_summary("january_2023_consolidated_backtest.xlsx")
