@@ -24,12 +24,12 @@ from datetime import datetime
 from dotenv import dotenv_values
 import numpy as np
 from typing import List, Tuple, Optional, Any
-from ELO_table import ELO_table
-from analyze_match import analyze_match
+from data_providers.ELO_table import ELO_table
+from core.analyze_match import analyze_match
 from aiolimiter import AsyncLimiter
 from collections import namedtuple
-from match_filter import MatchFilter
-from match_repository import MatchRepository
+from core.match_filter import MatchFilter
+from core.match_repository import MatchRepository
 
 SessionConfig = namedtuple('SessionConfig', ['header', 'connector', 'rate_limit', 'timeout'])
 
@@ -156,8 +156,8 @@ async def main() -> None:
     _notify_daily_results(matchs)
 
 def _notify_daily_results(matchs_str: str) -> None:
-    from alpha_tracker import get_session_bets
-    from email_notifier import send_daily_email
+    from strategy.alpha_tracker import get_session_bets
+    from strategy.email_notifier import send_daily_email
 
     total_matches = len([line for line in (matchs_str or "").split("\n") if line.strip()])
     bets = get_session_bets()

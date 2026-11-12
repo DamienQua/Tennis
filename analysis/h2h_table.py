@@ -16,9 +16,9 @@ The class handles parsing match details, calculating win percentages across diff
 import re
 import asyncio
 import aiohttp
-from indice_confiance import indice_confiance
-from h2h_stats import H2HStats, DateUtils
-from variables import indice_tab
+from analysis.indice_confiance import indice_confiance
+from analysis.h2h_stats import H2HStats, DateUtils
+from utils.variables import indice_tab
 
 class MatchContext:
     def __init__(self, surface, admin_url, header, match_id):

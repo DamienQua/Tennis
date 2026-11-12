@@ -16,8 +16,8 @@ from typing import Dict, Any, List, Optional
 from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator, BetRecord
 from backtest.backtest_engine import BacktestResult, BacktestEngine
-from elo_matcher import EloMatcher
-from ELO_table import ELO_table
+from data_providers.elo_matcher import EloMatcher
+from data_providers.ELO_table import ELO_table
 
 def _extract_match_data(ws: Any) -> Optional[Dict[str, Any]]:
     p1 = ws.cell(1, 2).value

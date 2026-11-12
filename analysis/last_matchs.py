@@ -19,8 +19,8 @@ The last_matchs function serves as the main entry point for match analysis.
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
-from match_statistics_processor import MatchStatisticsProcessor
-from helpers import DateHelper
+from analysis.match_statistics_processor import MatchStatisticsProcessor
+from utils.helpers import DateHelper
 
 class TennisDataFetcher:
     _activity_pane_cache = {}

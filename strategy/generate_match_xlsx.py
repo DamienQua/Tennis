@@ -21,7 +21,7 @@ import openpyxl
 from openpyxl.styles import Border, Side, PatternFill, Font
 from openpyxl.utils import get_column_letter
 from datetime import datetime
-from alpha_strategy import evaluate_alpha_strategy
+from strategy.alpha_strategy import evaluate_alpha_strategy
 
 async def generate_match_xlsx(match_vs):
     """Generate Excel file for tennis match analysis."""

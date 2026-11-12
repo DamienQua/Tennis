@@ -20,8 +20,8 @@ from backtest.tournament_crawler import TournamentCrawler
 from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator
 from backtest.backtest_engine import BacktestEngine
-from analyze_match import analyze_match
-from ELO_table import ELO_table
+from core.analyze_match import analyze_match
+from data_providers.ELO_table import ELO_table
 
 async def login(session: aiohttp.ClientSession) -> None:
     config = dotenv_values(".env")

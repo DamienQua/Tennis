@@ -23,9 +23,9 @@ import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 from datetime import date
-from variables import indice_tab
-from surface_performance_analyzer import SurfacePerformanceAnalyzer
-from match_statistics_analyzer import MatchStatisticsAnalyzer
+from utils.variables import indice_tab
+from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
+from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
 
 class TennisDataFetcher:
     def __init__(self, session):

@@ -10,10 +10,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-try:
-    from alpha_strategy import evaluate_alpha_strategy
-except ImportError:
-    from ..alpha_strategy import evaluate_alpha_strategy
+from strategy.alpha_strategy import evaluate_alpha_strategy
 
 class BetRecord:
     def __init__(

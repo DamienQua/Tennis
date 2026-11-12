@@ -29,16 +29,16 @@ from bs4 import BeautifulSoup
 import time
 import numpy as np
 import jaro
-from h2h_table import h2h_table, MatchContext
-from last_matchs import last_matchs
-from compare_players import compare_players
-from odds_match import odds_match, fetch_both_odds
-from indice_confiance import indice_confiance
-from compare_indice import compare_indice
-from generate_match_xlsx import generate_match_xlsx
-from elo_matcher import EloMatcher
-from alpha_strategy import evaluate_alpha_strategy
-from alpha_tracker import record_alpha_selection
+from analysis.h2h_table import h2h_table, MatchContext
+from analysis.last_matchs import last_matchs
+from analysis.compare_players import compare_players
+from data_providers.odds_match import odds_match, fetch_both_odds
+from analysis.indice_confiance import indice_confiance
+from analysis.compare_indice import compare_indice
+from strategy.generate_match_xlsx import generate_match_xlsx
+from data_providers.elo_matcher import EloMatcher
+from strategy.alpha_strategy import evaluate_alpha_strategy
+from strategy.alpha_tracker import record_alpha_selection
 
 async def _fetch_url_response(session, url, method, data):
     if method == 'post':
