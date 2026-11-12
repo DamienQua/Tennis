@@ -14,6 +14,8 @@ The class handles parsing match details, calculating win percentages across diff
 """
 
 import re
+import asyncio
+import aiohttp
 from indice_confiance import indice_confiance
 from h2h_stats import H2HStats, DateUtils
 from variables import indice_tab
@@ -26,8 +28,17 @@ class MatchContext:
         self.match_id = match_id
 
 async def fetch_data(session, url, data=None):
-    async with session.post(url, data=data) as response:
-        return await response.text()
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            async with session.post(url, data=data) as response:
+                return await response.text()
+        except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.0)
+            else:
+                raise
+    return ""
 
 class H2HDataProcessor:
     def __init__(self, data, match_vs):
@@ -43,13 +54,17 @@ class H2HDataProcessor:
         self._calculate_percentages()
 
     def _process_h2h_count(self):
-        if "tied" in self.data.text:
-            ind = 1
-        else:
-            ind = 0
+        if not self.data or not getattr(self.data, "text", None) or "series " not in self.data.text:
+            self.match_vs[6:14] = [0] * 8
+            return
+
+        ind = 1 if "tied" in self.data.text else 0
 
         for i in range(2):
-            self.stats.h2h_nb += int(self.data.text.strip().split("series ")[1].split(" ")[ind].split("-")[i].split("\n")[0])
+            try:
+                self.stats.h2h_nb += int(self.data.text.strip().split("series ")[1].split(" ")[ind].split("-")[i].split("\n")[0])
+            except Exception:
+                pass
 
         if self.stats.h2h_nb == 0:
             self.match_vs[6:14] = [0] * 8
@@ -73,7 +88,10 @@ class H2HDataProcessor:
 
     def _process_h2h_matches(self):
         """Process head-to-head matches."""
-        h2h_tr = self.data.find(class_="h2h-matches").find_all("tr")[1:]
+        h2h_elem = self.data.find(class_="h2h-matches") if self.data else None
+        if not h2h_elem:
+            return
+        h2h_tr = h2h_elem.find_all("tr")[1:]
         surface = self.match_vs[1]
         for tr in h2h_tr:
             date_ms, surface_m, winner, score = self._extract_match_details(tr)

@@ -19,6 +19,13 @@ Returns:
 
 from math import ceil, floor
 
+def _safe_float(val, default=0.0):
+    try:
+        s = str(val).strip()
+        return float(s) if s else default
+    except (ValueError, TypeError):
+        return default
+
 class AttributeComparator:
     def __init__(self, data):
         self.data = data
@@ -88,8 +95,8 @@ class Match:
             self.comp[1] += comp_b
 
     def add_odds_spread(self):
-        self.comp[0] += float(self.data[42]) * 5
-        self.comp[1] += float(self.data[43]) * 5
+        self.comp[0] += _safe_float(self.data[42]) * 5
+        self.comp[1] += _safe_float(self.data[43]) * 5
         self.comp[2] = self.comp[0] + self.comp[1]
 
     def calculate_odds(self):

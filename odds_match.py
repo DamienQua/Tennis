@@ -25,21 +25,12 @@ import re
 
 async def fetch_odds(session, player):
     url = f"https://www.oddsportal.com/search/{player}"
-    max_retries = 3
-    delay = 0.25
-    timeout = aiohttp.ClientTimeout(total=8.0, connect=4.0)
-
-    for attempt in range(max_retries):
-        try:
-            async with session.get(url, timeout=timeout) as resp:
-                if resp.status == 200:
-                    return await resp.text()
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(delay)
-        except Exception:
-            if attempt < max_retries - 1:
-                await asyncio.sleep(delay)
-    
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.5)) as resp:
+            if resp.status == 200:
+                return await resp.text()
+    except Exception:
+        pass
     return ""
 
 def _extract_match_name(text):

@@ -58,36 +58,38 @@ class MatchProcessor:
     def format_result(self, match_info: str, match_url: str) -> str:
         return f"{match_info}, {match_url}"
 
-    async def process(self, match_url: str, tournaments: Any, elo_data: str) -> Optional[str]:
+    async def process(self, match_url: str, tournaments: Any, elo_data: str, max_retries: int = 2) -> Optional[str]:
         if not self.should_process(match_url):
             return None
 
-        start = time.perf_counter()
-
-        try:
-            match_info = await self.fetch_and_analyze(match_url, tournaments, elo_data)
-        except aiohttp.ClientError:
-            return await self.handle_connection_error()
-        except Exception as e:
-            print(f"Erreur lors de l'analyse du match {match_url}: {e}")
-            return None
-
-        if not match_info:
-            return None
-
-        return self.finalize_result(match_info, match_url, start)
-
-    async def handle_connection_error(self) -> None:
-        print("Connection error, retrying...")
-        await asyncio.sleep(1)
+        for attempt in range(max_retries):
+            start = time.perf_counter()
+            try:
+                match_info = await self.fetch_and_analyze(match_url, tournaments, elo_data)
+                if not match_info:
+                    return None
+                return self.finalize_result(match_info, match_url, start)
+            except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError) as e:
+                if attempt < max_retries - 1:
+                    print(f"⚠️ Erreur temporaire ({type(e).__name__}) sur {match_url}, nouvelle tentative...")
+                    await asyncio.sleep(2.0)
+                else:
+                    return await self.handle_connection_error(match_url, e)
+            except Exception as e:
+                print(f"Erreur lors de l'analyse du match {match_url}: {type(e).__name__} {e}")
+                return None
         return None
 
-    def finalize_result(self, match_info: str, match_url: str, start: float, parallel_count: int = 3) -> str:
+    async def handle_connection_error(self, match_url: str = "", error: Optional[Exception] = None) -> None:
+        err_msg = f": {type(error).__name__} {error}" if error else ""
+        print(f"Erreur lors de l'analyse du match {match_url}{err_msg}")
+        return None
+
+    def finalize_result(self, match_info: str, match_url: str, start: float) -> str:
         result = self.format_result(match_info, match_url)
         raw_elapsed = round(time.perf_counter() - start, 2)
-        effective_time = round(raw_elapsed / parallel_count, 2)
         print(f"Match : {result}")
-        print(f"Time elapsed : {raw_elapsed} sec (temps effectif amorti: ~{effective_time} sec/match)\n")
+        print(f"Time elapsed : {raw_elapsed} sec\n")
         return result
 
 async def fetch_data(session: aiohttp.ClientSession, url: str, method: str = 'get', data: Optional[dict] = None) -> str:
@@ -98,8 +100,8 @@ async def fetch_data(session: aiohttp.ClientSession, url: str, method: str = 'ge
     async with methods[method](url, data=data) as response:
         return await response.text()
 
-def create_session_config(max_concurrent: int = 10, timeout_seconds: float = 20.0) -> SessionConfig:
-    header = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
+def create_session_config(max_concurrent: int = 15, timeout_seconds: float = 30.0) -> SessionConfig:
+    header = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     conn = aiohttp.TCPConnector(limit=max_concurrent)
     rate_limit = AsyncLimiter(10, 1)  # 10 requests per second
     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=10.0)
@@ -183,6 +185,7 @@ async def _process_single_match(
                 results.append(m_i)
                 all_matchs = "\n".join(results) + "\n"
                 repository.save_processed_match(m_i, all_matchs)
+        await asyncio.sleep(0.5)
         return m_i
 
 async def process_matches(
@@ -193,7 +196,7 @@ async def process_matches(
     atp_elo: str,
     wta_elo: str,
     repository: MatchRepository,
-    max_parallel_matches: int = 3
+    max_parallel_matches: int = 1
 ) -> str:
     already = repository.load_reviewed_matches()
     processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)

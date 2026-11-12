@@ -96,6 +96,8 @@ def extract_player_ids(abc, soup_abc=None):
 def clean_player_name(name):
     cleaned = re.sub(r'^\s*[\(\[][A-Za-z0-9/]+[\)\]]\s*', '', name.strip())
     cleaned = cleaned.replace("-Vinolas", "").replace(" Vitus Nodskov", "").strip()
+    if cleaned == "Cori Gauff":
+        return "Coco Gauff"
     return cleaned
 
 def _names_from_title(soup_abc):

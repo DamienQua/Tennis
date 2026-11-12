@@ -17,6 +17,7 @@ The last_matchs function serves as the main entry point for match analysis.
 """
 
 import asyncio
+import aiohttp
 from bs4 import BeautifulSoup
 from match_statistics_processor import MatchStatisticsProcessor
 from helpers import DateHelper
@@ -29,8 +30,17 @@ class TennisDataFetcher:
         self.admin_url = admin_url
 
     async def fetch_data(self, url, data=None):
-        async with self.session.post(url, data=data) as response:
-            return await response.text()
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                async with self.session.post(url, data=data) as response:
+                    return await response.text()
+            except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1.0)
+                else:
+                    raise
+        return ""
 
     @staticmethod
     def _extract_tournament_name(soup):

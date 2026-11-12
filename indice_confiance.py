@@ -19,6 +19,8 @@ Key components:
 - indice_confiance: Main function coordinating different analysis types
 """
 
+import asyncio
+import aiohttp
 from bs4 import BeautifulSoup
 from datetime import date
 from variables import indice_tab
@@ -30,12 +32,21 @@ class TennisDataFetcher:
         self.session = session
 
     async def fetch_data(self, url, data=None, method='POST'):
-        if method == 'POST':
-            async with self.session.post(url, data=data) as response:
-                return await response.text()
-        else:
-            async with self.session.get(url) as response:
-                return await response.text()
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                if method == 'POST':
+                    async with self.session.post(url, data=data) as response:
+                        return await response.text()
+                else:
+                    async with self.session.get(url) as response:
+                        return await response.text()
+            except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1.0)
+                else:
+                    raise
+        return ""
 
 class MotivationAnalyzer:
     def __init__(self, data_fetcher, admin_url, indice_tab):

@@ -2,8 +2,8 @@ name: Tennis Daily Predictions & Alpha 5+ Tracker
 
 on:
   schedule:
-    # Tous les matins à 07:00 UTC (08:00 heure d'hiver / 09:00 heure d'été en France)
-    - cron: '0 7 * * *'
+    # Tous les matins à 05:15 UTC (06:15 heure d'hiver / 07:15 heure d'été en France)
+    - cron: '15 5 * * *'
   # Déclenchement manuel d'un clic depuis l'onglet Actions de GitHub
   workflow_dispatch:
 
