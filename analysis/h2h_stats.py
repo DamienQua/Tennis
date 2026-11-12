@@ -6,7 +6,10 @@ class DateUtils:
     @staticmethod
     def parse_date(date_str):
         """Parses date string into a timestamp."""
-        return datetime.strptime(date_str.strip(), "%b %d %Y").timestamp()
+        try:
+            return datetime.strptime(date_str.strip(), "%b %d %Y").timestamp()
+        except (ValueError, AttributeError):
+            return 0.0
 
     @staticmethod
     def is_within_last_year(date_ms):

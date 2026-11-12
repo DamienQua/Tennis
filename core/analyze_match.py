@@ -209,7 +209,13 @@ def who_is_favorite(data):
 
 async def _fetch_match_soups(session, match, admin_url):
     """Fetches and parses main page and overview AJAX pane for a match."""
-    match_id = match.split("match/")[1].split("/")[0]
+    if not match or "match/" not in match:
+        print(f"⚠️ URL de match invalide : {match}")
+        return None
+    parts = match.split("match/")[1].split("/")
+    match_id = parts[0] if parts else ""
+    if not match_id:
+        return None
     overview_req = {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id}
     abc, overview_data = await asyncio.gather(
         fetch_data(session, match),

@@ -152,17 +152,27 @@ class TacticsAnalyzer:
 
     async def analyze(self, match_url, flag):
         """Analyzes tactical serve, return, and tiebreak metrics from match stats."""
-        match_id = self.extract_match_id(match_url)
-        stats_match = await self.fetch_match_stats(match_id)
-        serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
-        tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match)
-        self.indice_tab[6:18] = serve_return_stats
-        self.indice_tab[18:20] = tiebreak_stats
+        try:
+            match_id = self.extract_match_id(match_url)
+            if not match_id:
+                return
+            stats_match = await self.fetch_match_stats(match_id)
+            if not stats_match:
+                return
+            serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
+            tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match)
+            self.indice_tab[6:18] = serve_return_stats
+            self.indice_tab[18:20] = tiebreak_stats
+        except (IndexError, ValueError, AttributeError, TypeError, KeyError):
+            pass
 
     @staticmethod
     def extract_match_id(match_url):
         """Extracts numeric match ID from match preview URL."""
-        return match_url.split("match/")[1].split("/")[0]
+        if match_url and "match/" in match_url:
+            parts = match_url.split("match/")[1].split("/")
+            return parts[0] if parts else ""
+        return ""
 
     async def fetch_match_stats(self, match_id):
         """Fetches match statistics pane HTML for match ID."""

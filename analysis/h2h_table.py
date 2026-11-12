@@ -62,29 +62,38 @@ class H2HDataProcessor:
             self.match_vs[6:14] = [0] * 8
 
     @staticmethod
+    def _parse_row_score(lines):
+        try:
+            raw_score = lines[9].strip() if len(lines) > 9 else ""
+            clean_score = re.sub(r"[\(\[].*?[\)\]]", "", raw_score)
+            res = clean_score.replace("ret.", " ").replace("w/o", "").strip()
+            return res if res else "0-0 0-0"
+        except (IndexError, AttributeError):
+            return "0-0 0-0"
+
+    @staticmethod
     def _extract_match_details(row_elem):
         """Extract details from a match row."""
-        date_ms = DateUtils.parse_date(row_elem.text.strip().split("\t")[0].strip())
-        surface_m = row_elem.text.strip().split("\n")[5].strip().split(",")[0]
-        raw_winner = row_elem.text.strip().split("\n")[7].strip()
-        winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
         try:
-            raw_score = row_elem.text.strip().split("\n")[9].strip()
-            score = (
-                re.sub(r"[\(\[].*?[\)\]]", "", raw_score)
-                .replace("ret.", " ")
-                .replace("w/o", "")
-                .strip()
-            )
-        except (IndexError, AttributeError):
-            score = "0-0 0-0"
+            tab_parts = row_elem.text.strip().split("\t")
+            date_ms = DateUtils.parse_date(tab_parts[0].strip()) if tab_parts else 0
+        except (ValueError, IndexError, AttributeError):
+            date_ms = 0
+
+        lines = [line.strip() for line in row_elem.text.strip().split("\n") if line.strip()]
+        surface_m = lines[5].split(",")[0].strip() if len(lines) > 5 else ""
+        raw_winner = lines[7].strip() if len(lines) > 7 else ""
+        winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
+        score = H2HDataProcessor._parse_row_score(lines)
         return date_ms, surface_m, winner, score
 
     def _update_go_flag(self, row_elem, surface_m, winner):
         """Update the 'go' and 'flag' attributes if conditions are met."""
-        if self.go == "" and surface_m in row_elem.text:
-            self.go = row_elem.find_all("a")[-1]["href"]
-            self.flag = 0 if winner == self.match_vs[2] else 1
+        if self.go == "" and surface_m and surface_m in row_elem.text:
+            links = row_elem.find_all("a")
+            if links:
+                self.go = links[-1].get("href", "")
+                self.flag = 0 if winner == self.match_vs[2] else 1
 
     def _process_h2h_matches(self):
         """Process head-to-head matches."""
