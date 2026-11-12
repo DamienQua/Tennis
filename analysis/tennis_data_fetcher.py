@@ -20,20 +20,23 @@ class TennisDataFetcher:
 
     async def fetch_data(self, url: str, data: Any = None, method: str = 'POST') -> str:
         """Fetches HTML data asynchronously with retry logic."""
-        max_retries = 2
+        max_retries = 3
         for attempt in range(max_retries):
             try:
-                if method.upper() == 'GET':
-                    req = self.session.get(url)
-                else:
-                    req = self.session.post(url, data=data)
+                req = (
+                    self.session.get(url)
+                    if method.upper() == 'GET'
+                    else self.session.post(url, data=data)
+                )
                 async with req as response:
-                    return await response.text()
+                    if response.status == 200:
+                        text = await response.text()
+                        if text:
+                            return text
             except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1.0)
-                else:
-                    raise
+                pass
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
         return ""
 
     @staticmethod
