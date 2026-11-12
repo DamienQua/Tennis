@@ -132,7 +132,8 @@ class H2HStats:
             "games": self._calculate_percentage(self.p_a.games, self.p_b.games)
         }
 
-    def _calculate_percentage(self, wins_a, wins_b):
+    @staticmethod
+    def _calculate_percentage(wins_a, wins_b):
         total = wins_a + wins_b
         if total <= 0:
             return (0, 0)

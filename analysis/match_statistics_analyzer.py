@@ -1,10 +1,10 @@
 """
     A class for analyzing match statistics in tennis.
-    
+
     Provides methods to calculate serve, return, and tiebreak statistics from match data.
     Supports processing statistics for two players with a flag-based approach to handle
     different perspectives.
-    
+
     Methods:
         calculate_serve_return_stats: Extracts and calculates serve and return percentages
         calculate_tiebreak_stats: Computes tiebreak point win percentages from match scores
@@ -16,7 +16,8 @@
 import re
 
 class MatchStatisticsAnalyzer:
-    def calculate_serve_return_stats(self, stats_match, flag):
+    @staticmethod
+    def calculate_serve_return_stats(stats_match, flag):
         j2 = 2 if flag == 1 else 0
         cols = stats_match.find_all(class_="col-xs-4")
 
@@ -42,7 +43,7 @@ class MatchStatisticsAnalyzer:
             100 - p_bp, p_bp, 100 - r_bp, r_bp
         ]
 
-    def calculate_tiebreak_stats(self, stats_match, flag):
+    def calculate_tiebreak_stats(self, stats_match, _flag=None):
         header = stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0]
         scores = re.sub(r"\([^)]*\)", "", header.text.strip())
         if scores:
@@ -61,11 +62,13 @@ class MatchStatisticsAnalyzer:
                 )
         return tie_break_j1, tie_break_j2
 
-    def is_tiebreak(self, score):
+    @staticmethod
+    def is_tiebreak(score):
         s = score.split("-")
         return len(s) == 2 and int(s[0]) >= 6 and int(s[1]) >= 6
 
-    def update_tiebreak_counts(self, score, tie_break_j1, tie_break_j2):
+    @staticmethod
+    def update_tiebreak_counts(score, tie_break_j1, tie_break_j2):
         s = score.split("-")
         if int(s[0]) > int(s[1]):
             tie_break_j1 += 1

@@ -101,8 +101,10 @@ class StrategyEvaluator:
         if raw == "PAS OK":
             return "PAS OK"
 
-        elo_j1, elo_j2 = args[4], args[5]
-        book_j1, book_j2 = args[2], args[3]
+        elo_j1 = args[4]
+        elo_j2 = args[5]
+        book_j1 = args[2]
+        book_j2 = args[3]
         elo_diff = abs(_to_float(elo_j1) - _to_float(elo_j2))
         bet_odds = _to_float(book_j1) if raw == "OK J1" else _to_float(book_j2)
 
@@ -114,8 +116,13 @@ class StrategyEvaluator:
         return "PAS OK"
 
     def evaluate_match_confluence(self, *args, **kwargs) -> Any:
-        player_a, player_b, tournament = args[0], args[1], args[2]
-        excel_j1, excel_j2, book_j1, book_j2 = args[3], args[4], args[5], args[6]
+        player_a = args[0]
+        player_b = args[1]
+        tournament = args[2]
+        excel_j1 = args[3]
+        excel_j2 = args[4]
+        book_j1 = args[5]
+        book_j2 = args[6]
         winner = args[11]
 
         status = self.evaluate_confluence(*args[3:11], **kwargs)
@@ -138,8 +145,13 @@ class StrategyEvaluator:
         return None
 
     def _check_value_bet(self, *args, **kwargs) -> Any:
-        player_a, player_b, tournament, candidate = args[0], args[1], args[2], args[3]
-        model_odds, market_odds, winner = args[4], args[5], args[6]
+        player_a = args[0]
+        player_b = args[1]
+        tournament = args[2]
+        candidate = args[3]
+        model_odds = args[4]
+        market_odds = args[5]
+        winner = args[6]
 
         if model_odds <= 1.01 or market_odds <= 1.01:
             return None

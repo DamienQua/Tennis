@@ -17,7 +17,7 @@ Notes:
 """
 
 import aiohttp
-from bs4 import BeautifulSoup 
+from bs4 import BeautifulSoup
 from typing import Dict
 
 class EloFetcher:
@@ -47,7 +47,7 @@ async def elo_table(m_w: str) -> str:
         'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'
     )
     url = "https://tennisabstract.com/reports/" + m_w.lower() + "_elo_ratings.html"
-    
+
     content = await fetch_data(url, user_agent)
     soup = BeautifulSoup(content, 'lxml')
     tr_elements = soup.find_all("tr")[3:]
@@ -59,7 +59,7 @@ async def elo_table(m_w: str) -> str:
             table = f"{name} {td[6].text} {td[8].text} {td[10].text}\n"
             f.write(table)
             elo += table
-    
+
     return elo
 
 ELO_table = elo_table

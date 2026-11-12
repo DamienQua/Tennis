@@ -40,7 +40,7 @@ def _extract_match_name(text):
     away = re.search(pattern_away, text)
     if home and away:
         return f"{home.group(1)} - {away.group(1)}"
-    
+
     pat_name = (
         r'(?:&quot;|\\")name(?:&quot;|\\"):'
         r'(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")'
@@ -48,7 +48,7 @@ def _extract_match_name(text):
     match_name = re.search(pat_name, text)
     if match_name:
         return match_name.group(1)
-        
+
     html_players = re.findall(r'<p class="order-[12][^"]*">([^<]+)</p>', text)
     return f"{html_players[0]} - {html_players[1]}" if len(html_players) >= 2 else None
 
@@ -85,11 +85,11 @@ def _update_odds_indices(match_vs, indice_tab):
     else:
         indice_tab[20], indice_tab[21] = 10, 10
 
-async def process_odds(html, match_vs, indice_tab, player_index):
+async def process_odds(html, match_vs, indice_tab, _player_index=None):
     name, odds1, odds2 = extract_data(html)
     if not (name and odds1 and odds2):
         return False
-    
+
     odds = [float(odds1), float(odds2)]
     _assign_player_odds(name, odds, match_vs)
     _update_odds_indices(match_vs, indice_tab)
@@ -104,10 +104,10 @@ async def fetch_both_odds(session, player1_name, player2_name):
     )
 
 async def apply_odds_data(html1, html2, match_vs, indice_tab):
-    success = await process_odds(html1, match_vs, indice_tab, 2)
+    success = await process_odds(html1, match_vs, indice_tab)
     if not success:
-        await process_odds(html2, match_vs, indice_tab, 3)
-    
+        await process_odds(html2, match_vs, indice_tab)
+
     odds_a = float(match_vs[36]) if match_vs[36] else 0.0
     odds_b = float(match_vs[37]) if match_vs[37] else 0.0
     if odds_a < odds_b:
@@ -124,7 +124,7 @@ async def _odds_match_impl(session, match_vs, indice_tab, odds_future=None):
         html1, html2 = await odds_future
     else:
         html1, html2 = await fetch_both_odds(session, match_vs[2], match_vs[3])
-    
+
     return await apply_odds_data(html1, html2, match_vs, indice_tab)
 
 async def odds_match(match_vs, indice_tab, session=None, odds_future=None):

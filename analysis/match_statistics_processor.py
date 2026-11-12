@@ -1,16 +1,16 @@
 """
     A processor for handling and aggregating match statistics for a player.
-    
+
     This class manages the retrieval and processing of match statistics across tournaments,
-    providing methods to fetch player activity, extract match-specific statistics, and 
+    providing methods to fetch player activity, extract match-specific statistics, and
     aggregate key performance metrics.
-    
+
     Attributes:
         data_fetcher: A service responsible for retrieving player match data
         stats_processor: A service for processing individual match statistics
-    
+
     Methods:
-        process_match_statistics: Asynchronously retrieves and processes match statistics 
+        process_match_statistics: Asynchronously retrieves and processes match statistics
             for a specific player and tournament
         update_statistics: Updates aggregated statistics from individual match data
         is_match_in_tournament: Checks if a match belongs to a specific tournament
@@ -39,7 +39,7 @@ class MatchStatisticsProcessor:
         for m_i, match in enumerate(matches_list):
             if not self.is_match_in_tournament(match, tour_now):
                 break
-            new_stats = await self.get_match_statistics(data, matches_list, tour_now, m_i)
+            new_stats = await self.get_match_statistics(matches_list, m_i)
             stats_tuple = (min_tour, per_first_serve, points_first_serve, per_save_bp)
             min_tour, per_first_serve, points_first_serve, per_save_bp = self.update_statistics(
                 new_stats, stats_tuple, m_i, data
@@ -47,7 +47,8 @@ class MatchStatisticsProcessor:
 
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
-    def update_statistics(self, new_stats, current_stats, m_i, data):
+    @staticmethod
+    def update_statistics(new_stats, current_stats, m_i, data):
         min_tour, per_first_serve, points_first_serve, per_save_bp = current_stats
         if new_stats:
             min_tour += new_stats[0]
@@ -55,7 +56,8 @@ class MatchStatisticsProcessor:
                 per_first_serve, points_first_serve, per_save_bp = new_stats[1:]
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
-    def is_match_in_tournament(self, match, tour_now):
+    @staticmethod
+    def is_match_in_tournament(match, tour_now):
         if not tour_now or not getattr(match, "contents", None) or len(match.contents) < 2:
             return False
         href = match.contents[1].get("href", "") if hasattr(match.contents[1], "get") else ""
@@ -63,10 +65,10 @@ class MatchStatisticsProcessor:
         first_token = clean_tour.split("-")[0]
         return clean_tour in href or (len(first_token) >= 4 and first_token in href)
 
-    async def get_match_statistics(self, data, matches_list, tour_now, m_i):
+    async def get_match_statistics(self, matches_list, m_i, *args, **kwargs):
         try:
             return await self.stats_processor.process_match_statistics(
-                self.data_fetcher, matches_list, tour_now, m_i
+                self.data_fetcher, matches_list, m_i
             )
         except (
             aiohttp.ClientError, asyncio.TimeoutError,

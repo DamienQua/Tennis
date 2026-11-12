@@ -9,12 +9,12 @@ This module provides classes and functions for:
 
 The module supports different analysis types including:
 - Motivation analysis
-- Tactics analysis 
+- Tactics analysis
 - Surface performance analysis
 
 Key components:
 - TennisDataFetcher: Handles asynchronous data retrieval
-- MotivationAnalyzer: Evaluates player motivation 
+- MotivationAnalyzer: Evaluates player motivation
 - TacticsAnalyzer: Examines match statistics and tactics
 - indice_confiance: Main function coordinating different analysis types
 """
@@ -23,10 +23,10 @@ import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 from datetime import date
-from utils.variables import indice_tab
 from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
 from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
 from analysis.last_matchs import TennisDataFetcher
+from utils.helpers import get_arg
 
 class MotivationAnalyzer:
     def __init__(self, data_fetcher, admin_url, indice_tab):
@@ -38,13 +38,13 @@ class MotivationAnalyzer:
     async def analyze(self, player_id, match_id, surface, flag):
         data_html = await self.fetch_player_activity(player_id, match_id)
         data = BeautifulSoup(data_html, "lxml")
-        
+
         cat = self.get_tournament_category(data)
         nb_matchs = self.count_matches(data)
-        
+
         self.calculate_motivation_index(cat, nb_matchs, flag)
-        
-        await self.analyze_surface_performance(match_id, surface, flag)        
+
+        await self.analyze_surface_performance(match_id, surface, flag)
 
     async def fetch_player_activity(self, player_id, match_id):
         player_param = {
@@ -58,7 +58,8 @@ class MotivationAnalyzer:
         }
         return await self.data_fetcher.fetch_data(self.admin_url, player_param)
 
-    def get_tournament_category(self, data):
+    @staticmethod
+    def get_tournament_category(data):
         try:
             table = data.find(id="activity-table") if data else None
             if table:
@@ -135,7 +136,7 @@ class TacticsAnalyzer:
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
         self.indice_tab = indice_tab
-        self.stats_analyzer = MatchStatisticsAnalyzer() 
+        self.stats_analyzer = MatchStatisticsAnalyzer()
 
     async def analyze(self, match_url, flag):
         match_id = self.extract_match_id(match_url)
@@ -145,7 +146,8 @@ class TacticsAnalyzer:
         self.indice_tab[6:18] = serve_return_stats
         self.indice_tab[18:20] = tiebreak_stats
 
-    def extract_match_id(self, match_url):
+    @staticmethod
+    def extract_match_id(match_url):
         return match_url.split("match/")[1].split("/")[0]
 
     async def fetch_match_stats(self, match_id):
@@ -154,13 +156,15 @@ class TacticsAnalyzer:
         return BeautifulSoup(stats_match_html, "lxml")
 
 async def indice_confiance(*args, match_url="", indice_tab=None, **kwargs):
-    session, admin_url, player_id, match_id, surface, flag, choix = args[:7]
-    if len(args) > 7:
-        match_url = args[7]
-    if len(args) > 8:
-        indice_tab = args[8]
-    match_url = kwargs.get("match_url", match_url)
-    indice_tab = kwargs.get("indice_tab", indice_tab)
+    session = get_arg(args, 0, kwargs.get("session"))
+    admin_url = get_arg(args, 1, kwargs.get("admin_url"))
+    player_id = get_arg(args, 2, kwargs.get("player_id"))
+    match_id = get_arg(args, 3, kwargs.get("match_id"))
+    surface = get_arg(args, 4, kwargs.get("surface"))
+    flag = get_arg(args, 5, kwargs.get("flag", 0))
+    choix = get_arg(args, 6, kwargs.get("choix", ""))
+    match_url = kwargs.get("match_url", get_arg(args, 7, match_url))
+    indice_tab = kwargs.get("indice_tab", get_arg(args, 8, indice_tab))
 
     if indice_tab is None:
         from utils.variables import indice_tab as default_tab
@@ -170,11 +174,11 @@ async def indice_confiance(*args, match_url="", indice_tab=None, **kwargs):
     if choix == "Motivation":
         motivation_analyzer = MotivationAnalyzer(data_fetcher, admin_url, indice_tab)
         await motivation_analyzer.analyze(player_id, match_id, surface, flag)
-    
+
     elif choix == "Tactique":
         tactics_analyzer = TacticsAnalyzer(data_fetcher, admin_url, indice_tab)
         await tactics_analyzer.analyze(match_url, flag)
-    
+
     elif choix == "Surface":
         surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
         indice_tab[2*flag+1] = await surface_analyzer.analyze(match_id, surface, flag)

@@ -20,7 +20,7 @@ import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
 from analysis.match_statistics_processor import MatchStatisticsProcessor
-from utils.helpers import DateHelper
+from utils.helpers import DateHelper, get_arg
 
 class TennisDataFetcher:
     _activity_pane_cache = {}
@@ -90,7 +90,7 @@ class TennisDataFetcher:
             self.fetch_player_activity(player_id, match_id, 1),
             self.fetch_player_activity(player_id, match_id, 2)
         )
-    
+
     async def fetch_player_activity_with_odds(
         self, player_id, match_id, activity_option, flag, favorite
     ):
@@ -165,7 +165,7 @@ class StatisticsProcessor:
         return TennisDataParser.parse_win_percentages(data)
 
     @staticmethod
-    async def process_match_statistics(data_fetcher, matches_list, tour_now, m_i):
+    async def process_match_statistics(data_fetcher, matches_list, m_i, *args, **kwargs):
         stats_match = await data_fetcher.fetch_match_statistics(matches_list[m_i])
         return TennisDataParser.parse_match_statistics(stats_match)
 
@@ -215,12 +215,19 @@ class TennisMatchAnalyzer:
             pass
 
     async def analyze_match(self, *args, **kwargs):
-        today, match_vs, player_id, match_id, last_flag, favorite = args[:6]
+        today = get_arg(args, 0, kwargs.get("today"))
+        match_vs = get_arg(args, 1, kwargs.get("match_vs"))
+        player_id = get_arg(args, 2, kwargs.get("player_id"))
+        match_id = get_arg(args, 3, kwargs.get("match_id"))
+        last_flag = get_arg(args, 4, kwargs.get("last_flag", 0))
+        favorite = get_arg(args, 5, kwargs.get("favorite", False))
         default_tour = match_vs[0] if len(match_vs) > 0 and match_vs[0] else ""
-        tour_now, (data_act1, data_surf) = await asyncio.gather(
+        gathered = await asyncio.gather(
             self.fetch_tournament_data(match_id, default_tour=default_tour),
             self.data_fetcher.fetch_player_activities(player_id, match_id)
         )
+        tour_now = gathered[0]
+        data_act1, data_surf = gathered[1]
         win_percentages = self.extract_win_percentages(data_act1, data_surf)
         match_stats = await self.match_statistics_processor.process_match_statistics(
             player_id, match_id, tour_now, activity_data=data_act1
@@ -262,8 +269,9 @@ class TennisMatchAnalyzer:
         except (AttributeError, ValueError, TypeError, IndexError):
             return 0
 
+    @staticmethod
     def update_match_vs(
-        self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag
+        match_vs, win_percentages, match_stats, nb_match_last_month, last_flag
     ):
         offset = 14 + 11 * last_flag
         wp = (list(win_percentages) + [0.0] * 6)[:6]
@@ -271,7 +279,15 @@ class TennisMatchAnalyzer:
         match_vs[offset:offset+11] = wp + [nb_match_last_month] + ms
 
 async def last_matchs(*args, **kwargs):
-    session, today, match_vs, admin_url = args[0], args[1], args[2], args[3]
-    player_id, match_id, last_flag, favorite = args[4], args[5], args[6], args[7]
+    session = get_arg(args, 0, kwargs.get("session"))
+    today = get_arg(args, 1, kwargs.get("today"))
+    match_vs = get_arg(args, 2, kwargs.get("match_vs"))
+    admin_url = get_arg(args, 3, kwargs.get("admin_url"))
+    player_id = get_arg(args, 4, kwargs.get("player_id"))
+    match_id = get_arg(args, 5, kwargs.get("match_id"))
+    last_flag = get_arg(args, 6, kwargs.get("last_flag", 0))
+    favorite = get_arg(args, 7, kwargs.get("favorite", False))
     analyzer = TennisMatchAnalyzer(session, admin_url)
-    return await analyzer.analyze_match(today, match_vs, player_id, match_id, last_flag, favorite)
+    return await analyzer.analyze_match(
+        today, match_vs, player_id, match_id, last_flag, favorite
+    )

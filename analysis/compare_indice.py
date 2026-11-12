@@ -4,7 +4,7 @@ based on specific and range-based index comparisons.
 
 This module provides functionality to:
 - Compare specific indices in a given index table
-- Compare ranges of indices 
+- Compare ranges of indices
 - Calculate a comparative score based on the comparisons
 - Determine a final index value for a specific position
 

@@ -53,9 +53,11 @@ class BacktestEngine:
 
     def process_match_result(self, *args, **kwargs) -> Optional[BacktestResult]:
         match_url = args[0]
-        player_a, player_b = args[1], args[2]
+        player_a = args[1]
+        player_b = args[2]
         tournament = args[3]
-        model_odds_a, model_odds_b = args[4], args[5]
+        model_odds_a = args[4]
+        model_odds_b = args[5]
         elo_a = get_arg(args, 6, kwargs.get("elo_a", 0.0))
         elo_b = get_arg(args, 7, kwargs.get("elo_b", 0.0))
         surface_a = get_arg(args, 8, kwargs.get("surface_a", 0.0))

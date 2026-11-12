@@ -19,7 +19,7 @@ Args:
     elo: Elo ratings data
 
 Returns:
-    str: A summary of key match details including tournament, surface, players, 
+    str: A summary of key match details including tournament, surface, players,
          and various performance indicators
 """
 
@@ -133,8 +133,9 @@ def _names_from_slug(match_url):
     parts = [p for p in match_url.split('/') if p]
     match_slug = parts[-1] if parts else ""
     if '-vs-' in match_slug:
-        p1_slug, p2_slug = match_slug.split('-vs-')[:2]
-        return p1_slug.replace('-', ' ').title(), p2_slug.replace('-', ' ').title()
+        slug_parts = match_slug.split('-vs-')
+        if len(slug_parts) >= 2:
+            return slug_parts[0].replace('-', ' ').title(), slug_parts[1].replace('-', ' ').title()
     return None
 
 def extract_player_names(soup_abc, match_url, data_text=""):
@@ -239,7 +240,7 @@ async def analyze_match(session, header, match, tournaments, elo):
     # Phase 2: Head-to-Head table (safely uses indice_tab[1] and indice_tab[3] computed in Phase 1)
     ctx = MatchContext(surface, admin_url, header, match_id)
     await h2h_table(data, match_vs, session, ctx, indice_tab=indice_tab)
-            
+
     compare_players(match_vs)
 
     match_vs, indice_tab = await odds_match(
@@ -250,9 +251,9 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     elo_a, elo_b = EloMatcher.find_elo_ratings(elo, match_vs[2], match_vs[3], surface)
 
-    if elo_a.replace(".","").isdigit():
+    if elo_a.replace(".", "").isdigit():
         match_vs[40] = elo_a
-    if elo_b.replace(".","").isdigit():
+    if elo_b.replace(".", "").isdigit():
         match_vs[41] = elo_b
 
     alpha_res = evaluate_alpha_strategy(

@@ -24,7 +24,7 @@ from datetime import datetime
 from dotenv import dotenv_values
 import numpy as np
 from typing import List, Tuple, Optional, Any
-from data_providers.ELO_table import elo_table, ELO_table
+from data_providers.ELO_table import elo_table
 from core.analyze_match import analyze_match
 from aiolimiter import AsyncLimiter
 from collections import namedtuple
@@ -56,7 +56,8 @@ class MatchProcessor:
         async with self.rate_limit:
             return await analyze_match(self.session, self.header, match_url, tournaments, elo_data)
 
-    def format_result(self, match_info: str, match_url: str) -> str:
+    @staticmethod
+    def format_result(match_info: str, match_url: str) -> str:
         return f"{match_info}, {match_url}"
 
     async def process(
@@ -89,8 +90,9 @@ class MatchProcessor:
                 return None
         return None
 
+    @staticmethod
     async def handle_connection_error(
-        self, match_url: str = "", error: Optional[Exception] = None
+        match_url: str = "", error: Optional[Exception] = None
     ) -> None:
         err_msg = f": {type(error).__name__} {error}" if error else ""
         print(f"Erreur lors de l'analyse du match {match_url}{err_msg}")

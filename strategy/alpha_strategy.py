@@ -9,6 +9,7 @@ Calculates the Alpha 5+ signal based on model odds, market odds, and Elo ratings
 """
 
 from typing import Dict, Any, Tuple
+from utils.helpers import get_arg
 
 def _safe_float(val: Any) -> float:
     try:
@@ -121,17 +122,14 @@ def evaluate_alpha_strategy(
     player_2: str = "Joueur 2",
     **kwargs
 ) -> Dict[str, Any]:
-    if len(args) >= 8:
-        model_1, model_2, book_1, book_2, elo_1, elo_2, player_1, player_2 = args[:8]
-    elif len(args) == 6:
-        model_1, model_2, book_1, book_2, elo_1, elo_2 = args
-    else:
-        model_1 = kwargs.get("model_1", 0.0)
-        model_2 = kwargs.get("model_2", 0.0)
-        book_1 = kwargs.get("book_1", 0.0)
-        book_2 = kwargs.get("book_2", 0.0)
-        elo_1 = kwargs.get("elo_1", 0.0)
-        elo_2 = kwargs.get("elo_2", 0.0)
+    model_1 = get_arg(args, 0, kwargs.get("model_1", 0.0))
+    model_2 = get_arg(args, 1, kwargs.get("model_2", 0.0))
+    book_1 = get_arg(args, 2, kwargs.get("book_1", 0.0))
+    book_2 = get_arg(args, 3, kwargs.get("book_2", 0.0))
+    elo_1 = get_arg(args, 4, kwargs.get("elo_1", 0.0))
+    elo_2 = get_arg(args, 5, kwargs.get("elo_2", 0.0))
+    player_1 = get_arg(args, 6, kwargs.get("player_1", player_1))
+    player_2 = get_arg(args, 7, kwargs.get("player_2", player_2))
 
     m1, m2 = _safe_float(model_1), _safe_float(model_2)
     b1, b2 = _safe_float(book_1), _safe_float(book_2)

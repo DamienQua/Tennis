@@ -2,14 +2,14 @@
 Generate an Excel file with detailed tennis match analysis.
 
 This function creates an Excel workbook with comprehensive statistics comparing two tennis players.
-The generated file includes performance metrics such as world ranking, win percentages, 
+The generated file includes performance metrics such as world ranking, win percentages,
 service statistics, estimated match odds, bookmaker odds, Elo ratings,
 and the Alpha 5+ All-Court betting strategy recommendations.
 
 Args:
     match_vs (list): A list containing match and player statistics.
 
-Generates an Excel file in a structured directory with the match details and saves it 
+Generates an Excel file in a structured directory with the match details and saves it
 to the 'Matchs/[Year]/[Month]/[Tournament]' directory.
 
 Example:
@@ -37,7 +37,7 @@ async def generate_match_xlsx(match_vs):
     _adjust_column_widths(sheet)
     _apply_cell_borders(sheet)
     _apply_strategy_styling(sheet)
-    
+
     file_path = _save_workbook(workbook, date, tournament, player1, player2)
     print(f"Excel file '{file_path}' has been generated.")
 
@@ -49,7 +49,7 @@ def _prepare_match_data(match_vs, player1, player2):
     m1, m2 = _safe_get(match_vs, 36), _safe_get(match_vs, 37)
     b1, b2 = _safe_get(match_vs, 38), _safe_get(match_vs, 39)
     e1, e2 = _safe_get(match_vs, 40), _safe_get(match_vs, 41)
-    
+
     alpha = evaluate_alpha_strategy(m1, m2, b1, b2, e1, e2, player1, player2)
 
     return [
@@ -59,7 +59,7 @@ def _prepare_match_data(match_vs, player1, player2):
         ["% Victoires surface", match_vs[19], match_vs[30]],
         ["", "", ""],
         ["Ratio V/D carrière", match_vs[6], match_vs[7]],
-        ["Ratio V/D 1 an", match_vs[8], match_vs[9]], 
+        ["Ratio V/D 1 an", match_vs[8], match_vs[9]],
         ["Ratio V/D surface", match_vs[10], match_vs[11]],
         ["% Sets gagnés", match_vs[12], match_vs[13]],
         ["", "", ""],
@@ -68,7 +68,7 @@ def _prepare_match_data(match_vs, player1, player2):
         ["% Victoires 50 derniers matchs", match_vs[15], match_vs[26]],
         ["% Victoires 10 derniers matchs", match_vs[14], match_vs[25]],
         ["Nombre matchs joués dernier mois", match_vs[20], match_vs[31]],
-        ["Durée cumulée des derniers matchs tournoi en cours", match_vs[21], match_vs[32]], 
+        ["Durée cumulée des derniers matchs tournoi en cours", match_vs[21], match_vs[32]],
         ["", "", ""],
         ["% 1er service", match_vs[22], match_vs[33]],
         ["% points gagnés service", match_vs[23], match_vs[34]],
@@ -121,7 +121,7 @@ def _get_max_column_length(column):
 def _apply_cell_borders(sheet):
     """Apply thin borders to all cells in the sheet."""
     thin_border = _create_thin_border()
-    
+
     for row in sheet.iter_rows(
         min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):
@@ -151,9 +151,9 @@ def _apply_strategy_styling(sheet):
 def _create_thin_border():
     """Create a thin border style for cells."""
     return Border(
-        left=Side(style='thin'), 
-        right=Side(style='thin'), 
-        top=Side(style='thin'), 
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
         bottom=Side(style='thin')
     )
 
@@ -162,7 +162,7 @@ def _save_workbook(workbook, date, tournament, player1, player2):
     folder_path = _create_match_folder(tournament)
     filename = _generate_filename(date, player1, player2)
     full_path = os.path.join(folder_path, filename)
-    
+
     workbook.save(full_path)
     return full_path
 
@@ -176,7 +176,7 @@ def _create_match_folder(tournament):
     """Create the directory structure for match files."""
     year = _extract_year_from_tournament(tournament)
     month = "January" if year < datetime.now().year else datetime.now().strftime("%B")
-    
+
     folder_path = os.path.join("Matchs", str(year), month, tournament.replace(' ', '_'))
     os.makedirs(folder_path, exist_ok=True)
     return folder_path

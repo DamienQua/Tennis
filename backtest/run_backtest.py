@@ -57,14 +57,21 @@ def parse_match_metrics(result_str: str) -> Dict[str, Any]:
     }
 
 async def _analyze_single_match(*args, **kwargs) -> Optional[Any]:
-    session, header, match_url, tournaments = args[0], args[1], args[2], args[3]
-    elo_data, semaphore, engine, year, gender = args[4], args[5], args[6], args[7], args[8]
+    session = args[0]
+    header = args[1]
+    match_url = args[2]
+    tournaments = args[3]
+    elo_data = args[4]
+    semaphore = args[5]
+    engine = args[6]
+    year = args[7]
+    gender = args[8]
     async with semaphore:
         try:
             start = time.perf_counter()
             match_res = await analyze_match(session, header, match_url, tournaments, elo_data)
             m = parse_match_metrics(match_res)
-            
+
             backtest_res = engine.process_match_result(
                 match_url,
                 m["p_a"],
@@ -91,8 +98,13 @@ async def _analyze_single_match(*args, **kwargs) -> Optional[Any]:
             return None
 
 async def _run_matches_batch(*args, **kwargs) -> None:
-    session, header, matches, tname = args[0], args[1], args[2], args[3]
-    elo_data, semaphore, engine = args[4], args[5], args[6]
+    session = args[0]
+    header = args[1]
+    matches = args[2]
+    tname = args[3]
+    elo_data = args[4]
+    semaphore = args[5]
+    engine = args[6]
     year = kwargs.get("year", 2023)
     gender = kwargs.get("gender", "atp")
     tasks = [

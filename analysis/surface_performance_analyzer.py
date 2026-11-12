@@ -1,13 +1,13 @@
 """
     Analyzes surface performance statistics for a tennis match.
-    
-    This class fetches and processes match statistics to calculate a player's performance 
+
+    This class fetches and processes match statistics to calculate a player's performance
     rank based on their win percentage on a specific surface type.
-    
+
     Args:
         data_fetcher: An object responsible for fetching match data.
         admin_url: The URL for accessing match statistics.
-    
+
     Methods:
         analyze(match_id, surface, flag): Calculates rank from surface win percentages.
 """
@@ -42,14 +42,16 @@ class SurfacePerformanceAnalyzer:
                 return index
         return None
 
-    def _extract_tds(self, data, flag):
+    @staticmethod
+    def _extract_tds(data, flag):
         table_idx = 1 if flag == 0 else 4
         tables = data.find_all(class_="table match-preview-statistics-table")
         if len(tables) > table_idx:
             return tables[table_idx].find_all("td")
         return []
 
-    def _calculate_surface_rank(self, tds, target_idx):
+    @staticmethod
+    def _calculate_surface_rank(tds, target_idx):
         win_sur = float(tds[target_idx].text.replace("%", "").replace("N/A", "0"))
         rank = 10
         for j in range(12, min(len(tds), 41), 7):

@@ -122,8 +122,8 @@ class PointInTimeStats:
                     self.player_history[l] = []
                 self.player_history[l].append((d, s, False))
 
+    @staticmethod
     def _tally_history(
-        self,
         history: List[Tuple[pd.Timestamp, str, bool]],
         match_date: pd.Timestamp,
         date_12m: pd.Timestamp,
@@ -201,13 +201,16 @@ class PointInTimeBacktester:
     @staticmethod
     def _estimate_model_odds(*args, **kwargs) -> Tuple[float, float]:
         """Estimate model odds based on player surface %, ranking, and recent form."""
-        surf_a, surf_b = args[0], args[1]
-        rank_a, rank_b = args[2], args[3]
-        form_a, form_b = args[4], args[5]
+        surf_a = args[0]
+        surf_b = args[1]
+        rank_a = args[2]
+        rank_b = args[3]
+        form_a = args[4]
+        form_b = args[5]
         # Score components (60% surface/form, 40% ranking ratio)
         diff_surf = (surf_a - surf_b) * 0.4
         diff_form = (form_a - form_b) * 0.3
-        
+
         # Ranking factor (lower rank is better)
         r_a = max(1.0, rank_a if rank_a > 0 else 200.0)
         r_b = max(1.0, rank_b if rank_b > 0 else 200.0)
@@ -272,7 +275,13 @@ class PointInTimeBacktester:
 
     @staticmethod
     def _build_record(*args, **kwargs) -> Dict[str, Any]:
-        info, models, books, elos, surfs, status, bet = args[:7]
+        info = args[0]
+        models = args[1]
+        books = args[2]
+        elos = args[3]
+        surfs = args[4]
+        status = args[5]
+        bet = args[6]
         return {
             "date": info["date"],
             "tournament": info["tour"],

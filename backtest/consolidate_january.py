@@ -86,7 +86,7 @@ def _process_tournament(
 async def consolidate_january():
     base_dir = "Matchs/2023/January"
     tour_folders = [f for f in glob.glob(os.path.join(base_dir, "*")) if os.path.isdir(f)]
-    
+
     odds_provider = HistoricalOddsProvider()
     evaluator = StrategyEvaluator()
     engine = BacktestEngine(

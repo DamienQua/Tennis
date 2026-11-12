@@ -9,7 +9,7 @@ Key components:
 - H2HDataProcessor: Processes and calculates head-to-head match statistics
 - h2h_table: Async function to generate H2H match insights and update confidence indices
 
-The class handles parsing match details, calculating win percentages across different categories 
+The class handles parsing match details, calculating win percentages across different categories
 (all-time, last year, surface-specific, and game-related), and supporting confidence index
 generation.
 """
@@ -17,7 +17,6 @@ generation.
 import re
 from analysis.indice_confiance import indice_confiance
 from analysis.h2h_stats import H2HStats, DateUtils
-from utils.variables import indice_tab
 
 class MatchContext:
     def __init__(self, surface, admin_url, header, match_id):
@@ -57,7 +56,8 @@ class H2HDataProcessor:
         if self.stats.h2h_nb == 0:
             self.match_vs[6:14] = [0] * 8
 
-    def _extract_match_details(self, tr):
+    @staticmethod
+    def _extract_match_details(tr):
         """Extract details from a match row."""
         date_ms = DateUtils.parse_date(tr.text.strip().split("\t")[0].strip())
         surface_m = tr.text.strip().split("\n")[5].strip().split(",")[0]
