@@ -31,11 +31,14 @@ class DateHelper:
 
     @staticmethod
     def is_valid_date(show_class, i, today, date_i, one_month):
-        return show_class[i].text != "Date" and today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month
+        not_date = show_class[i].text != "Date"
+        parsed_ts = datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp()
+        return not_date and (today - parsed_ts <= one_month)
 
     @staticmethod
     def is_within_last_month(show_class, date_i, today, one_month):
-        return today - datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp() <= one_month
+        parsed_ts = datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp()
+        return today - parsed_ts <= one_month
 
     @staticmethod
     def update_date_index(show_class, i, date_i, nb_match_last_month):

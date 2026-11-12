@@ -80,7 +80,10 @@ class FastEloMatcher:
         init = parts[-1][0]
         last_word = parts[-2]
         surname = " ".join(parts[:-1])
-        return self.exact_lookup.get(f"{last_word}_{init}") or self.exact_lookup.get(f"{surname}_{init}")
+        return (
+            self.exact_lookup.get(f"{last_word}_{init}")
+            or self.exact_lookup.get(f"{surname}_{init}")
+        )
 
     def _fuzzy_lookup_rating(self, p_clean: str, surface: str) -> float:
         for full_name, r in self.raw_lines:
@@ -154,7 +157,9 @@ class PointInTimeStats:
         date_12m = match_date - timedelta(days=365)
         surf_clean = surface.strip().lower()
 
-        w_12m, tot_12m, w_surf, tot_surf = self._tally_history(history, match_date, date_12m, surf_clean)
+        w_12m, tot_12m, w_surf, tot_surf = self._tally_history(
+            history, match_date, date_12m, surf_clean
+        )
 
         pct_12m = round((w_12m / tot_12m) * 100, 2) if tot_12m > 0 else 50.0
         pct_surf = round((w_surf / tot_surf) * 100, 2) if tot_surf > 0 else 50.0
@@ -239,7 +244,10 @@ class PointInTimeBacktester:
         target_raw["Date"] = pd.to_datetime(target_raw["Date"])
         target_df = target_raw[target_raw["Comment"] == "Completed"].sort_values("Date")
 
-        print(f"Running Point-in-Time backtest for {gender.upper()} {year} ({len(target_df)} matches)...")
+        print(
+            f"Running Point-in-Time backtest for {gender.upper()} {year} "
+            f"({len(target_df)} matches)..."
+        )
 
         for _, row in target_df.iterrows():
             self._process_single_row(row, stats_engine, elo_matcher)
@@ -314,7 +322,9 @@ class PointInTimeBacktester:
         rank_w = self._get_val(row, "WRank")
         rank_l = self._get_val(row, "LRank")
 
-        odds_w_model, odds_l_model = self._estimate_model_odds(surf_w, surf_l, rank_w, rank_l, form_w, form_l)
+        odds_w_model, odds_l_model = self._estimate_model_odds(
+            surf_w, surf_l, rank_w, rank_l, form_w, form_l
+        )
 
         # Market closing odds (Pinnacle preferred, Bet365 fallback)
         book_w = self._get_val(row, "PSW", "B365W")
@@ -324,7 +334,8 @@ class PointInTimeBacktester:
         elo_l = elo_matcher.get_elo(p_l, surface)
 
         bet = self.evaluator.evaluate_match_confluence(
-            p_w, p_l, tour, odds_w_model, odds_l_model, book_w, book_l, elo_w, elo_l, surf_w, surf_l, p_w
+            p_w, p_l, tour, odds_w_model, odds_l_model,
+            book_w, book_l, elo_w, elo_l, surf_w, surf_l, p_w
         )
 
         status = self.evaluator.evaluate_confluence(

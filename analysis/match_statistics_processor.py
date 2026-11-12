@@ -22,8 +22,13 @@ class MatchStatisticsProcessor:
         self.data_fetcher = data_fetcher
         self.stats_processor = stats_processor
 
-    async def process_match_statistics(self, player_id, match_id, tour_now, activity_data=None):
-        data = activity_data if activity_data is not None else await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
+    async def process_match_statistics(
+        self, player_id, match_id, tour_now, activity_data=None
+    ):
+        if activity_data is not None:
+            data = activity_data
+        else:
+            data = await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
         pAB_matchs = data.find_all(class_="activity-clickthroughs no-link") if data else []
 
         min_tour, per_first_serve, points_first_serve, per_save_bp = 0, 0, 0, 0
@@ -38,7 +43,9 @@ class MatchStatisticsProcessor:
 
         return min_tour, per_first_serve, points_first_serve, per_save_bp
 
-    def update_statistics(self, new_stats, min_tour, per_first_serve, points_first_serve, per_save_bp, m_i, data):
+    def update_statistics(
+        self, new_stats, min_tour, per_first_serve, points_first_serve, per_save_bp, m_i, data
+    ):
         if new_stats:
             min_tour += new_stats[0]
             if m_i == 0 and data and "Qualifying" not in data.text:
@@ -55,6 +62,8 @@ class MatchStatisticsProcessor:
 
     async def get_match_statistics(self, data, pAB_matchs, tour_now, m_i):
         try:
-            return await self.stats_processor.process_match_statistics(self.data_fetcher, pAB_matchs, tour_now, m_i)
-        except:
+            return await self.stats_processor.process_match_statistics(
+                self.data_fetcher, pAB_matchs, tour_now, m_i
+            )
+        except Exception:
             return None

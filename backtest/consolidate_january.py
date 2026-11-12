@@ -89,7 +89,9 @@ async def consolidate_january():
     
     odds_provider = HistoricalOddsProvider()
     evaluator = StrategyEvaluator()
-    engine = BacktestEngine(historical_odds=odds_provider, evaluator=evaluator, output_dir="backtest/results")
+    engine = BacktestEngine(
+        historical_odds=odds_provider, evaluator=evaluator, output_dir="backtest/results"
+    )
 
     atp_elo, wta_elo = await asyncio.gather(ELO_table("ATP"), ELO_table("WTA"))
     print(f"Consolidating backtest results from {len(tour_folders)} tournaments...")

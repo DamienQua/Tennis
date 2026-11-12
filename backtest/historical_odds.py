@@ -50,8 +50,11 @@ class HistoricalOddsProvider:
 
         return jaro.jaro_winkler_metric(p_clean, c_clean) >= 0.85
 
-    def _find_match_row(self, df: pd.DataFrame, player_a: str, player_b: str) -> Optional[Tuple[pd.Series, bool]]:
-        """Search DataFrame for a match between player_a and player_b. Returns (row, a_is_winner)."""
+    def _find_match_row(
+        self, df: pd.DataFrame, player_a: str, player_b: str
+    ) -> Optional[Tuple[pd.Series, bool]]:
+        """Search DataFrame for a match between player_a and player_b.
+        Returns (row, a_is_winner)."""
         for _, row in df.iterrows():
             w = str(row["Winner"])
             l = str(row["Loser"])
@@ -86,7 +89,9 @@ class HistoricalOddsProvider:
         return w, l
 
     @classmethod
-    def _format_odds_dict(cls, row: pd.Series, player_a: str, player_b: str, a_is_winner: bool) -> Dict[str, Any]:
+    def _format_odds_dict(
+        cls, row: pd.Series, player_a: str, player_b: str, a_is_winner: bool
+    ) -> Dict[str, Any]:
         odds_w = {}
         odds_l = {}
         for book in ("B365", "PS", "Avg"):

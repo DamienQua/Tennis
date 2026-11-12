@@ -2,10 +2,11 @@
     A class for analyzing match statistics in tennis.
     
     Provides methods to calculate serve, return, and tiebreak statistics from match data.
-    Supports processing statistics for two players with a flag-based approach to handle different perspectives.
+    Supports processing statistics for two players with a flag-based approach to handle
+    different perspectives.
     
     Methods:
-        calculate_serve_return_stats: Extracts and calculates serve and return performance percentages
+        calculate_serve_return_stats: Extracts and calculates serve and return percentages
         calculate_tiebreak_stats: Computes tiebreak point win percentages from match scores
         parse_tiebreak_scores: Identifies and counts tiebreak points from match scores
         is_tiebreak: Determines if a given score represents a tiebreak scenario
@@ -17,24 +18,33 @@ import re
 class MatchStatisticsAnalyzer:
     def calculate_serve_return_stats(self, stats_match, flag):
         j2 = 2 if flag == 1 else 0
-        points_first_serve = float(stats_match.find_all(class_="col-xs-4")[12+j2].text.strip().split("%")[0])
-        points_second_serve = float(stats_match.find_all(class_="col-xs-4")[15+j2].text.strip().split("%")[0])
-        return_first_serve = float(stats_match.find_all(class_="col-xs-4")[24+j2].text.strip().split("%")[0])
-        return_second_serve = float(stats_match.find_all(class_="col-xs-4")[27+j2].text.strip().split("%")[0])
-        points_save_bp = float(stats_match.find_all(class_="col-xs-4")[18+j2].text.strip().split("%")[0])
-        return_save_bp = float(stats_match.find_all(class_="col-xs-4")[30+j2].text.strip().split("%")[0])
-        
+        cols = stats_match.find_all(class_="col-xs-4")
+
+        def _val(offset):
+            return float(cols[offset + j2].text.strip().split("%")[0])
+
+        p_first = _val(12)
+        p_second = _val(15)
+        r_first = _val(24)
+        r_second = _val(27)
+        p_bp = _val(18)
+        r_bp = _val(30)
+
         if flag == 0:
-            return [points_first_serve, 100-points_first_serve, points_second_serve, 100-points_second_serve,
-                    return_first_serve, 100-return_first_serve, return_second_serve, 100-return_second_serve,
-                    points_save_bp, 100-points_save_bp, return_save_bp, 100-return_save_bp]
-        else:
-            return [100-points_first_serve, points_first_serve, 100-points_second_serve, points_second_serve,
-                    100-return_first_serve, return_first_serve, 100-return_second_serve, return_second_serve,
-                    100-points_save_bp, points_save_bp, 100-return_save_bp, return_save_bp]
+            return [
+                p_first, 100 - p_first, p_second, 100 - p_second,
+                r_first, 100 - r_first, r_second, 100 - r_second,
+                p_bp, 100 - p_bp, r_bp, 100 - r_bp
+            ]
+        return [
+            100 - p_first, p_first, 100 - p_second, p_second,
+            100 - r_first, r_first, 100 - r_second, r_second,
+            100 - p_bp, p_bp, 100 - r_bp, r_bp
+        ]
 
     def calculate_tiebreak_stats(self, stats_match, flag):
-        scores = re.sub(r"\([^)]*\)", "", stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0].text.strip())
+        header = stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0]
+        scores = re.sub(r"\([^)]*\)", "", header.text.strip())
         if scores:
             tie_break_j1, tie_break_j2 = self.parse_tiebreak_scores(scores)
             total = tie_break_j1 + tie_break_j2
@@ -46,7 +56,9 @@ class MatchStatisticsAnalyzer:
         tie_break_j1, tie_break_j2 = 0, 0
         for score in scores.split(" "):
             if self.is_tiebreak(score):
-                tie_break_j1, tie_break_j2 = self.update_tiebreak_counts(score, tie_break_j1, tie_break_j2)
+                tie_break_j1, tie_break_j2 = self.update_tiebreak_counts(
+                    score, tie_break_j1, tie_break_j2
+                )
         return tie_break_j1, tie_break_j2
 
     def is_tiebreak(self, score):

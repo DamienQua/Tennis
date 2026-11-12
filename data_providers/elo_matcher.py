@@ -15,9 +15,13 @@ class EloMatcher:
 
     @classmethod
     def get_player_elo(cls, player_line, match_player_name, surface):
-        player_vs = " ".join(takewhile(lambda x: not (x.isdigit() or x.replace(".", "", 1).isdigit()), player_line.split(" ")))
+        words = player_line.split(" ")
+        is_num = lambda x: x.isdigit() or x.replace(".", "", 1).isdigit()
+        player_vs = " ".join(takewhile(lambda x: not is_num(x), words))
         alias_name = cls.PLAYER_ALIASES.get(match_player_name, match_player_name)
-        if jaro.jaro_winkler_metric(match_player_name, player_vs) >= 0.95 or jaro.jaro_winkler_metric(alias_name, player_vs) >= 0.95:
+        sim_orig = jaro.jaro_winkler_metric(match_player_name, player_vs)
+        sim_alias = jaro.jaro_winkler_metric(alias_name, player_vs)
+        if sim_orig >= 0.95 or sim_alias >= 0.95:
             return cls.extract_elo_rating(player_line, player_vs, surface)
         return ""
 

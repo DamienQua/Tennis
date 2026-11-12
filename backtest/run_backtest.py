@@ -88,8 +88,8 @@ async def _analyze_single_match(
                 gender=gender
             )
             elapsed = round(time.perf_counter() - start, 2)
-            confluence = backtest_res.match_data.get("confluence", "N/A") if backtest_res else "SKIP"
-            print(f"Match: {m['p_a']} vs {m['p_b']} | Status: {confluence} | Time: {elapsed}s")
+            c_val = backtest_res.match_data.get("confluence", "N/A") if backtest_res else "SKIP"
+            print(f"Match: {m['p_a']} vs {m['p_b']} | Status: {c_val} | Time: {elapsed}s")
             return backtest_res
         except Exception as e:
             print(f"Error analyzing {match_url}: {e}")
@@ -117,7 +117,8 @@ async def run_tournament_backtest(
 
         tasks = [
             _analyze_single_match(
-                session, header, m_url, np.array([tournament_name]), elo_data, semaphore, engine, year, gender
+                session, header, m_url, np.array([tournament_name]),
+                elo_data, semaphore, engine, year, gender
             )
             for m_url in matches
         ]
@@ -178,7 +179,8 @@ async def run_january_2023_backtest(max_concurrency: int = 3) -> Dict[str, Any]:
 
             tasks = [
                 _analyze_single_match(
-                    session, header, m_url, np.array([tname]), elo_data, semaphore, engine, 2023, gender
+                    session, header, m_url, np.array([tname]),
+                    elo_data, semaphore, engine, 2023, gender
                 )
                 for m_url in matches
             ]

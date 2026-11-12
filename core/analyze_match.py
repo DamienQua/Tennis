@@ -172,19 +172,19 @@ def parse_player_rankings(data):
     rankings = []
     for i in range(2):
         try:
-            ranking = int(data.text.replace("Unknown","1000").split("(HI")[i].split("\n")[-1].strip())
-        except:
+            clean_txt = data.text.replace("Unknown", "1000")
+            ranking = int(clean_txt.split("(HI")[i].split("\n")[-1].strip())
+        except Exception:
             ranking = 1000
         rankings.append(ranking)
     return rankings
 
 def who_is_favorite(data):
-    try :
-        if float(data.find(class_="mp_bio_left").find_all("li")[-1].text.strip()) > float(data.find(class_="mp_bio_right").find_all("li")[-1].text.strip()):
-            return [1, 0]
-        else:
-            return [0, 1]
-    except:
+    try:
+        left_val = float(data.find(class_="mp_bio_left").find_all("li")[-1].text.strip())
+        right_val = float(data.find(class_="mp_bio_right").find_all("li")[-1].text.strip())
+        return [1, 0] if left_val > right_val else [0, 1]
+    except Exception:
         return [0, 0]
 
 async def analyze_match(session, header, match, tournaments, elo):
@@ -195,9 +195,10 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     match_id = match.split("match/")[1].split("/")[0]
 
+    overview_req = {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id}
     abc, overview_data = await asyncio.gather(
         fetch_data(session, match),
-        fetch_data(session, admin_url, 'post', {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id})
+        fetch_data(session, admin_url, 'post', overview_req)
     )
     soup_abc = BeautifulSoup(abc, "lxml")
     data = BeautifulSoup(overview_data, "lxml")
@@ -223,18 +224,25 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     # Phase 1: Motivation & surface performance (fills indice_tab[0:4]), plus recent match histories
     await asyncio.gather(
-        indice_confiance(session, admin_url, pA_id, match_id, surface, 0, "Motivation", indice_tab=indice_tab),
-        indice_confiance(session, admin_url, pB_id, match_id, surface, 1, "Motivation", indice_tab=indice_tab),
+        indice_confiance(
+            session, admin_url, pA_id, match_id, surface, 0, "Motivation", indice_tab=indice_tab
+        ),
+        indice_confiance(
+            session, admin_url, pB_id, match_id, surface, 1, "Motivation", indice_tab=indice_tab
+        ),
         last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0, favorite),
         last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1, favorite)
     )
 
     # Phase 2: Head-to-Head table (safely uses indice_tab[1] and indice_tab[3] computed in Phase 1)
-    await h2h_table(data, match_vs, session, MatchContext(surface, admin_url, header, match_id), indice_tab=indice_tab)
+    ctx = MatchContext(surface, admin_url, header, match_id)
+    await h2h_table(data, match_vs, session, ctx, indice_tab=indice_tab)
             
     compare_players(match_vs)
 
-    match_vs, indice_tab = await odds_match(match_vs, indice_tab, session=session, odds_future=odds_future)
+    match_vs, indice_tab = await odds_match(
+        match_vs, indice_tab, session=session, odds_future=odds_future
+    )
 
     compare_indice(indice_tab, match_vs)
 

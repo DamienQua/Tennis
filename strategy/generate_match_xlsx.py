@@ -122,7 +122,9 @@ def _apply_cell_borders(sheet):
     """Apply thin borders to all cells in the sheet."""
     thin_border = _create_thin_border()
     
-    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column):
+    for row in sheet.iter_rows(
+        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+    ):
         for cell in row:
             cell.border = thin_border
 
@@ -138,7 +140,9 @@ def _apply_strategy_styling(sheet):
     green_font = Font(color="006100", bold=True)
     bold_font = Font(bold=True)
 
-    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column):
+    for row in sheet.iter_rows(
+        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+    ):
         header = str(row[0].value or "")
         if "STRATÉGIE ALPHA 5+" in header:
             row[0].font = bold_font

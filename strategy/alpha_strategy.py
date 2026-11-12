@@ -107,8 +107,14 @@ def format_alpha_summary(res: Dict[str, Any]) -> str:
         b = res["book_odds"]
         ev = res["ev_percent"]
         diff = res["elo_diff"]
-        return f"🎯 SIGNAL ALPHA 5+: Pari conseillé sur {p} @ {b:.2f} (EV: {ev:+.1f}%, ΔELO: {diff:+.0f})"
-    return f"⚪ Stratégie Alpha 5+: Aucun signal (EV J1: {res.get('ev_j1_str', '-')}, EV J2: {res.get('ev_j2_str', '-')})"
+        return (
+            f"🎯 SIGNAL ALPHA 5+: Pari conseillé sur {p} @ {b:.2f} "
+            f"(EV: {ev:+.1f}%, ΔELO: {diff:+.0f})"
+        )
+    return (
+        f"⚪ Stratégie Alpha 5+: Aucun signal "
+        f"(EV J1: {res.get('ev_j1_str', '-')}, EV J2: {res.get('ev_j2_str', '-')})"
+    )
 
 def _is_valid_input(m1: float, m2: float, b1: float, b2: float, e1: float, e2: float) -> bool:
     return (min(m1, m2, b1, b2) > 1.01) and (min(e1, e2) > 0)

@@ -1,5 +1,6 @@
 """
-Analysis module for player statistics, head-to-head records, confidence indices, and match performance.
+Analysis module for player statistics, head-to-head records,
+confidence indices, and match performance.
 """
 
 from .compare_indice import compare_indice, IndiceComparator

@@ -56,8 +56,9 @@ class TennisDataFetcher:
     async def fetch_tournament_data(self, match_id, default_tour=""):
         try:
             if match_id not in TennisDataFetcher._activity_pane_cache:
+                pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
                 TennisDataFetcher._activity_pane_cache[match_id] = await self.fetch_data(
-                    self.admin_url, {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
+                    self.admin_url, pane_req
                 )
             soup = BeautifulSoup(TennisDataFetcher._activity_pane_cache[match_id], "lxml")
             tour_name = self._extract_tournament_name(soup)
@@ -86,16 +87,24 @@ class TennisDataFetcher:
             self.fetch_player_activity(player_id, match_id, 2)
         )
     
-    async def fetch_player_activity_with_odds(self, player_id, match_id, activity_option, flag, favorite):
+    async def fetch_player_activity_with_odds(
+        self, player_id, match_id, activity_option, flag, favorite
+    ):
         odds_option = "5" if favorite[flag] == 1 else "6"
-        return await self.fetch_player_activity(player_id, match_id, activity_option, odds_option)
-
+        return await self.fetch_player_activity(
+            player_id, match_id, activity_option, odds_option
+        )
 
     async def fetch_match_statistics(self, pAB_match):
         try:
             a_tags = pAB_match.find_all("a") if pAB_match else []
-            if len(a_tags) >= 2 and a_tags[1].has_attr("data-action") and a_tags[1].has_attr("data-matchid"):
-                stats_match_html = await self.fetch_data(self.admin_url, {"action": a_tags[1]["data-action"], "matchID": a_tags[1]["data-matchid"]})
+            valid_link = len(a_tags) >= 2 and a_tags[1].has_attr("data-action")
+            if valid_link and a_tags[1].has_attr("data-matchid"):
+                action_data = {
+                    "action": a_tags[1]["data-action"],
+                    "matchID": a_tags[1]["data-matchid"]
+                }
+                stats_match_html = await self.fetch_data(self.admin_url, action_data)
                 return BeautifulSoup(stats_match_html, "lxml")
         except Exception:
             pass
@@ -134,9 +143,14 @@ class TennisDataParser:
             h5 = stats_match.find("h5")
             min_tour = int(h5.text.split(" m")[0]) if h5 and " m" in h5.text else 0
             cols = stats_match.find_all(class_="col-xs-4")
-            per_first_serve = float(cols[9].text.replace("N/A","0").strip().split("%")[0]) if len(cols) > 9 else 0.0
-            points_first_serve = float(cols[12].text.replace("N/A","0").strip().split("%")[0]) if len(cols) > 12 else 0.0
-            per_save_bp = float(cols[18].text.replace("N/A","0").strip().split("%")[0]) if len(cols) > 18 else 0.0
+            def _extract_pct(idx):
+                if len(cols) <= idx:
+                    return 0.0
+                return float(cols[idx].text.replace("N/A", "0").strip().split("%")[0])
+
+            per_first_serve = _extract_pct(9)
+            points_first_serve = _extract_pct(12)
+            per_save_bp = _extract_pct(18)
             return min_tour, per_first_serve, points_first_serve, per_save_bp
         except Exception:
             return 0, 0, 0, 0
@@ -155,7 +169,9 @@ class TennisMatchAnalyzer:
     def __init__(self, session, admin_url):
         self.data_fetcher = TennisDataFetcher(session, admin_url)
         self.stats_processor = StatisticsProcessor()
-        self.match_statistics_processor = MatchStatisticsProcessor(self.data_fetcher, self.stats_processor)
+        self.match_statistics_processor = MatchStatisticsProcessor(
+            self.data_fetcher, self.stats_processor
+        )
 
     @staticmethod
     def _get_odds_table_tokens(odds_spread):
@@ -182,7 +198,9 @@ class TennisMatchAnalyzer:
 
     async def _update_player_odds(self, match_vs, player_id, match_id, last_flag, favorite):
         try:
-            odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(player_id, match_id, 1, last_flag, favorite)
+            odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(
+                player_id, match_id, 1, last_flag, favorite
+            )
             is_fav = favorite[last_flag] == 1
             odds_val = self._extract_odds_spread_value(odds_spread, is_fav)
             if odds_val is not None:
@@ -235,12 +253,16 @@ class TennisMatchAnalyzer:
         except Exception:
             return 0
 
-    def update_match_vs(self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag):
+    def update_match_vs(
+        self, match_vs, win_percentages, match_stats, nb_match_last_month, last_flag
+    ):
         offset = 14 + 11 * last_flag
         wp = (list(win_percentages) + [0.0] * 6)[:6]
         ms = (list(match_stats) + [0.0] * 4)[:4]
         match_vs[offset:offset+11] = wp + [nb_match_last_month] + ms
 
-async def last_matchs(session, today, match_vs, admin_url, player_id, match_id, last_flag, favorite):
+async def last_matchs(
+    session, today, match_vs, admin_url, player_id, match_id, last_flag, favorite
+):
     analyzer = TennisMatchAnalyzer(session, admin_url)
     return await analyzer.analyze_match(today, match_vs, player_id, match_id, last_flag, favorite)

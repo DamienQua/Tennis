@@ -58,7 +58,9 @@ class MatchProcessor:
     def format_result(self, match_info: str, match_url: str) -> str:
         return f"{match_info}, {match_url}"
 
-    async def process(self, match_url: str, tournaments: Any, elo_data: str, max_retries: int = 2) -> Optional[str]:
+    async def process(
+        self, match_url: str, tournaments: Any, elo_data: str, max_retries: int = 2
+    ) -> Optional[str]:
         if not self.should_process(match_url):
             return None
 
@@ -71,7 +73,10 @@ class MatchProcessor:
                 return self.finalize_result(match_info, match_url, start)
             except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError) as e:
                 if attempt < max_retries - 1:
-                    print(f"⚠️ Erreur temporaire ({type(e).__name__}) sur {match_url}, nouvelle tentative...")
+                    print(
+                        f"⚠️ Erreur temporaire ({type(e).__name__}) sur {match_url}, "
+                        "nouvelle tentative..."
+                    )
                     await asyncio.sleep(2.0)
                 else:
                     return await self.handle_connection_error(match_url, e)
@@ -80,7 +85,9 @@ class MatchProcessor:
                 return None
         return None
 
-    async def handle_connection_error(self, match_url: str = "", error: Optional[Exception] = None) -> None:
+    async def handle_connection_error(
+        self, match_url: str = "", error: Optional[Exception] = None
+    ) -> None:
         err_msg = f": {type(error).__name__} {error}" if error else ""
         print(f"Erreur lors de l'analyse du match {match_url}{err_msg}")
         return None
@@ -92,7 +99,12 @@ class MatchProcessor:
         print(f"Time elapsed : {raw_elapsed} sec\n")
         return result
 
-async def fetch_data(session: aiohttp.ClientSession, url: str, method: str = 'get', data: Optional[dict] = None) -> str:
+async def fetch_data(
+    session: aiohttp.ClientSession,
+    url: str,
+    method: str = 'get',
+    data: Optional[dict] = None
+) -> str:
     methods = {
         'get': session.get,
         'post': session.post
@@ -101,7 +113,11 @@ async def fetch_data(session: aiohttp.ClientSession, url: str, method: str = 'ge
         return await response.text()
 
 def create_session_config(max_concurrent: int = 15, timeout_seconds: float = 30.0) -> SessionConfig:
-    header = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    user_agent = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    )
+    header = {'User-Agent': user_agent}
     conn = aiohttp.TCPConnector(limit=max_concurrent)
     rate_limit = AsyncLimiter(10, 1)  # 10 requests per second
     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=10.0)
@@ -126,15 +142,26 @@ async def login(session: aiohttp.ClientSession) -> None:
     if not username or not password:
         has_env_login = bool(os.environ.get("TENNISINSIGHT_LOGIN"))
         has_env_pass = bool(os.environ.get("TENNISINSIGHT_PASSWORD"))
-        print(f"DEBUG: env TENNISINSIGHT_LOGIN={has_env_login}, env TENNISINSIGHT_PASSWORD={has_env_pass}")
-        raise ValueError("Erreur: Les identifiants TENNISINSIGHT_LOGIN et TENNISINSIGHT_PASSWORD doivent être définis (dans les variables d'environnement ou le fichier .env)")
+        print(
+            f"DEBUG: env TENNISINSIGHT_LOGIN={has_env_login}, "
+            f"env TENNISINSIGHT_PASSWORD={has_env_pass}"
+        )
+        raise ValueError(
+            "Erreur: Les identifiants TENNISINSIGHT_LOGIN et TENNISINSIGHT_PASSWORD "
+            "doivent être définis (dans les variables d'environnement ou le fichier .env)"
+        )
     login_data = {"log": username, "pwd": password}
-    await fetch_data(session, "https://tennisinsight.com/wp-login.php", method='post', data=login_data)
+    await fetch_data(
+        session, "https://tennisinsight.com/wp-login.php", method='post', data=login_data
+    )
 
 async def fetch_match_previews(session: aiohttp.ClientSession) -> Tuple[np.ndarray, List[str]]:
     mtch_previews_html = await fetch_data(session, "https://tennisinsight.com/match-previews/")
     mtch_previews = BeautifulSoup(mtch_previews_html, "lxml")
-    tournaments = np.array([tour.text for tour in mtch_previews.find_all(class_="heading-link") if any(x in tour.text for x in ["ATP", "WTA", "Masters"])])
+    tournaments = np.array([
+        tour.text for tour in mtch_previews.find_all(class_="heading-link")
+        if any(x in tour.text for x in ["ATP", "WTA", "Masters"])
+    ])
     mtch = [m.a["href"] for m in mtch_previews.find_all(class_="match-row-link")]
     return tournaments, mtch
 
@@ -150,7 +177,9 @@ async def main() -> None:
     ) as session:
         await login(session)
         tournaments, mtch = await fetch_match_previews(session)
-        matchs = await process_matches(session, session_config, tournaments, mtch, atp_elo, wta_elo, repository)
+        matchs = await process_matches(
+            session, session_config, tournaments, mtch, atp_elo, wta_elo, repository
+        )
 
     print(matchs)
     _notify_daily_results(matchs)

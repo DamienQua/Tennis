@@ -1,5 +1,6 @@
 """
-Compares indices and calculates a comparative score based on specific and range-based index comparisons.
+Compares indices and calculates a comparative score
+based on specific and range-based index comparisons.
 
 This module provides functionality to:
 - Compare specific indices in a given index table

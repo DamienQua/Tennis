@@ -9,7 +9,7 @@
         admin_url: The URL for accessing match statistics.
     
     Methods:
-        analyze(match_id, surface, flag): Calculates a performance rank based on surface-specific win percentages.
+        analyze(match_id, surface, flag): Calculates rank from surface win percentages.
 """
 
 from bs4 import BeautifulSoup
@@ -25,7 +25,8 @@ class SurfacePerformanceAnalyzer:
     async def fetch_statistics_html(self, match_id):
         if match_id in SurfacePerformanceAnalyzer._stats_cache:
             return SurfacePerformanceAnalyzer._stats_cache[match_id]
-        html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
+        pane_req = {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id}
+        html = await self.data_fetcher.fetch_data(self.admin_url, pane_req)
         SurfacePerformanceAnalyzer._stats_cache[match_id] = html
         return html
 
@@ -57,7 +58,8 @@ class SurfacePerformanceAnalyzer:
 
     async def analyze(self, match_id, surface, flag):
         try:
-            stats_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id})
+            pane_req = {"action": "lazyLoadPanes", "pane": "statistics", "matchID": match_id}
+            stats_html = await self.data_fetcher.fetch_data(self.admin_url, pane_req)
             target_idx = self._find_surface_index(surface)
             if target_idx is None:
                 return 10

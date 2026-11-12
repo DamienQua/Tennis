@@ -118,9 +118,13 @@ class StrategyEvaluator:
         surface_j1: float,
         surface_j2: float
     ) -> str:
-        if cls._is_ok_j1(excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2):
+        if cls._is_ok_j1(
+            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
+        ):
             return "OK J1"
-        if cls._is_ok_j2(excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2):
+        if cls._is_ok_j2(
+            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
+        ):
             return "OK J2"
         return "PAS OK"
 
@@ -157,7 +161,9 @@ class StrategyEvaluator:
         if "grass" in s_clean:
             return "PAS OK"
 
-        raw = cls.evaluate_confluence(excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2)
+        raw = cls.evaluate_confluence(
+            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
+        )
         if raw == "PAS OK":
             return "PAS OK"
 
@@ -191,12 +197,18 @@ class StrategyEvaluator:
         )
         if status == "OK J1":
             won = (player_a == winner)
-            record = BetRecord(f"{player_a} vs {player_b}", tournament, player_a, excel_j1, book_j1, won, self.stake_size)
+            record = BetRecord(
+                f"{player_a} vs {player_b}", tournament, player_a,
+                excel_j1, book_j1, won, self.stake_size
+            )
             self.bets.append(record)
             return record
         elif status == "OK J2":
             won = (player_b == winner)
-            record = BetRecord(f"{player_a} vs {player_b}", tournament, player_b, excel_j2, book_j2, won, self.stake_size)
+            record = BetRecord(
+                f"{player_a} vs {player_b}", tournament, player_b,
+                excel_j2, book_j2, won, self.stake_size
+            )
             self.bets.append(record)
             return record
         return None
@@ -221,7 +233,9 @@ class StrategyEvaluator:
         if edge >= self.value_edge_threshold:
             match_name = f"{player_a} vs {player_b}"
             won = (candidate == winner)
-            return BetRecord(match_name, tournament, candidate, model_odds, market_odds, won, self.stake_size)
+            return BetRecord(
+                match_name, tournament, candidate, model_odds, market_odds, won, self.stake_size
+            )
         return None
 
     def get_summary(self) -> Dict[str, Any]:

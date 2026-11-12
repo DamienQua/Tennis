@@ -67,7 +67,15 @@ class MotivationAnalyzer:
         await self.analyze_surface_performance(match_id, surface, flag)        
 
     async def fetch_player_activity(self, player_id, match_id):
-        pAB_param = {"action": "playerActivity", "activityOffset": "0", "basic-activity-option": "3", "odds": "0", "filterType": "basic", "playerID": player_id, "matchID": match_id}
+        pAB_param = {
+            "action": "playerActivity",
+            "activityOffset": "0",
+            "basic-activity-option": "3",
+            "odds": "0",
+            "filterType": "basic",
+            "playerID": player_id,
+            "matchID": match_id
+        }
         return await self.data_fetcher.fetch_data(self.admin_url, pAB_param)
 
     def get_tournament_category(self, data):
@@ -161,12 +169,16 @@ class TacticsAnalyzer:
         return match_url.split("match/")[1].split("/")[0]
 
     async def fetch_match_stats(self, match_id):
-        stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, {"action": "showMatchStats", "matchID": match_id, "refresh": "true"})
+        req = {"action": "showMatchStats", "matchID": match_id, "refresh": "true"}
+        stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, req)
         return BeautifulSoup(stats_match_html, "lxml")
 
-async def indice_confiance(session, admin_url, player_id, match_id, surface, flag, choix, match_url="", indice_tab=None):
+async def indice_confiance(
+    session, admin_url, player_id, match_id, surface, flag, choix,
+    match_url="", indice_tab=None
+):
     if indice_tab is None:
-        from variables import indice_tab as default_tab
+        from utils.variables import indice_tab as default_tab
         indice_tab = default_tab
     data_fetcher = TennisDataFetcher(session)
 

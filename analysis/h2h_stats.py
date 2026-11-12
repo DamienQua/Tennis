@@ -63,4 +63,6 @@ class H2HStats:
 
     def _calculate_percentage(self, wins_a, wins_b):
         total = wins_a + wins_b
-        return (round(100 * wins_a / total, 2), round(100 * wins_b / total, 2)) if total > 0 else (0, 0)
+        if total <= 0:
+            return (0, 0)
+        return (round(100 * wins_a / total, 2), round(100 * wins_b / total, 2))

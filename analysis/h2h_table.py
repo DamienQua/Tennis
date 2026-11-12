@@ -10,7 +10,8 @@ Key components:
 - h2h_table: Async function to generate H2H match insights and update confidence indices
 
 The class handles parsing match details, calculating win percentages across different categories 
-(all-time, last year, surface-specific, and game-related), and supporting confidence index generation.
+(all-time, last year, surface-specific, and game-related), and supporting confidence index
+generation.
 """
 
 import re
@@ -62,7 +63,9 @@ class H2HDataProcessor:
 
         for i in range(2):
             try:
-                self.stats.h2h_nb += int(self.data.text.strip().split("series ")[1].split(" ")[ind].split("-")[i].split("\n")[0])
+                split_series = self.data.text.strip().split("series ")[1]
+                val = split_series.split(" ")[ind].split("-")[i].split("\n")[0]
+                self.stats.h2h_nb += int(val)
             except Exception:
                 pass
 
@@ -73,10 +76,17 @@ class H2HDataProcessor:
         """Extract details from a match row."""
         date_ms = DateUtils.parse_date(tr.text.strip().split("\t")[0].strip())
         surface_m = tr.text.strip().split("\n")[5].strip().split(",")[0]
-        winner = re.sub(r"[\(\[].*?[\)\]]", "", tr.text.strip().split("\n")[7].strip()).split("  d")[0].strip()
+        raw_winner = tr.text.strip().split("\n")[7].strip()
+        winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
         try:
-            score = re.sub(r"[\(\[].*?[\)\]]", "", tr.text.strip().split("\n")[9].strip()).replace("ret.", " ").replace("w/o", "").strip()
-        except:
+            raw_score = tr.text.strip().split("\n")[9].strip()
+            score = (
+                re.sub(r"[\(\[].*?[\)\]]", "", raw_score)
+                .replace("ret.", " ")
+                .replace("w/o", "")
+                .strip()
+            )
+        except Exception:
             score = "0-0 0-0"
         return date_ms, surface_m, winner, score
 
@@ -100,11 +110,14 @@ class H2HDataProcessor:
 
     def _calculate_percentages(self):
         percentages = self.stats.calculate_percentages()
-        self.match_vs[6:14] = percentages["all_time"] + percentages["last_year"] + percentages["surface"] + percentages["games"]
+        self.match_vs[6:14] = (
+            percentages["all_time"] + percentages["last_year"] +
+            percentages["surface"] + percentages["games"]
+        )
 
 async def h2h_table(data, match_vs, session, match_context: MatchContext, indice_tab=None):
     if indice_tab is None:
-        from variables import indice_tab as default_tab
+        from utils.variables import indice_tab as default_tab
         indice_tab = default_tab
 
     processor = H2HDataProcessor(data, match_vs)
@@ -116,6 +129,10 @@ async def h2h_table(data, match_vs, session, match_context: MatchContext, indice
         indice_tab[5] = 2*indice_tab[3]
 
     if processor.go != "":
-        await indice_confiance(session, match_context.admin_url, "", match_context.match_id, match_context.surface, processor.flag, "Tactique", processor.go, indice_tab=indice_tab)
+        await indice_confiance(
+            session, match_context.admin_url, "", match_context.match_id,
+            match_context.surface, processor.flag, "Tactique", processor.go,
+            indice_tab=indice_tab
+        )
 
     return match_vs

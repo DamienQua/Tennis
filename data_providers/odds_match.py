@@ -34,12 +34,18 @@ async def fetch_odds(session, player):
     return ""
 
 def _extract_match_name(text):
-    home = re.search(r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
-    away = re.search(r'(?:&quot;|\\")away-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")', text)
+    pattern_home = r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")'
+    pattern_away = r'(?:&quot;|\\")away-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")'
+    home = re.search(pattern_home, text)
+    away = re.search(pattern_away, text)
     if home and away:
         return f"{home.group(1)} - {away.group(1)}"
     
-    match_name = re.search(r'(?:&quot;|\\")name(?:&quot;|\\"):(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")', text)
+    pat_name = (
+        r'(?:&quot;|\\")name(?:&quot;|\\"):'
+        r'(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")'
+    )
+    match_name = re.search(pat_name, text)
     if match_name:
         return match_name.group(1)
         
