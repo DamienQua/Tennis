@@ -9,6 +9,7 @@ Sends an email summary with:
 
 import os
 import smtplib
+import socket
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -135,7 +136,7 @@ def _attach_excel(msg: MIMEMultipart, filepath: str) -> None:
             part = MIMEApplication(f.read(), Name=os.path.basename(filepath))
             part["Content-Disposition"] = f'attachment; filename="{os.path.basename(filepath)}"'
             msg.attach(part)
-    except Exception as e:
+    except OSError as e:
         print(f"⚠️ Impossible d'attacher le fichier Excel {filepath}: {e}")
 
 def _dispatch_smtp(cfg: Dict[str, str], msg: MIMEMultipart) -> None:
@@ -159,7 +160,6 @@ def send_daily_email(
         )
         print(msg_cfg)
         return False
-        return False
 
     date_str = datetime.now().strftime("%d/%m/%Y")
     subject = _build_subject(len(bets), date_str)
@@ -177,6 +177,6 @@ def send_daily_email(
         _dispatch_smtp(cfg, msg)
         print(f"📧 Email récapitulatif envoyé avec succès à {cfg['recipient']}")
         return True
-    except Exception as e:
+    except (smtplib.SMTPException, socket.error, OSError, TimeoutError) as e:
         print(f"⚠️ Erreur lors de l'envoi de l'email : {e}")
         return False

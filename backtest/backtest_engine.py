@@ -11,12 +11,30 @@ from typing import List, Dict, Any, Optional
 import pandas as pd
 from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator, BetRecord
+from utils.helpers import get_arg
 
 class BacktestResult:
     def __init__(self, match_url: str, match_data: Dict[str, Any], bets: List[BetRecord]):
         self.match_url = match_url
         self.match_data = match_data
         self.bets = bets
+
+def print_backtest_summary(
+    summary: Dict[str, Any],
+    total_matches: int,
+    saved_path: str,
+    title: str = "BILAN CONSOLIDÉ"
+) -> None:
+    print("\n" + "=" * 60)
+    print(f"🏆 {title}")
+    print(f"Total Matchs Analysés : {total_matches}")
+    print(f"Total Paris Déclenchés  : {summary['total_bets']}")
+    print(f"Paris Gagnés / Perdus   : {summary['wins']} / {summary['losses']}")
+    print(f"Taux de Réussite        : {summary['win_rate']}%")
+    print(f"P&L Total               : {summary['total_pnl']} unités")
+    print(f"ROI                     : {summary['roi_percent']}%")
+    print(f"Rapport consolidé dans  : {saved_path}")
+    print("=" * 60 + "\n")
 
 class BacktestEngine:
     """Coordinates historical match execution and strategy evaluation."""
@@ -33,21 +51,18 @@ class BacktestEngine:
         os.makedirs(self.output_dir, exist_ok=True)
         self.results: List[BacktestResult] = []
 
-    def process_match_result(
-        self,
-        match_url: str,
-        player_a: str,
-        player_b: str,
-        tournament: str,
-        model_odds_a: float,
-        model_odds_b: float,
-        elo_a: float = 0.0,
-        elo_b: float = 0.0,
-        surface_a: float = 0.0,
-        surface_b: float = 0.0,
-        year: int = 2023,
-        gender: str = "atp"
-    ) -> Optional[BacktestResult]:
+    def process_match_result(self, *args, **kwargs) -> Optional[BacktestResult]:
+        match_url = args[0]
+        player_a, player_b = args[1], args[2]
+        tournament = args[3]
+        model_odds_a, model_odds_b = args[4], args[5]
+        elo_a = get_arg(args, 6, kwargs.get("elo_a", 0.0))
+        elo_b = get_arg(args, 7, kwargs.get("elo_b", 0.0))
+        surface_a = get_arg(args, 8, kwargs.get("surface_a", 0.0))
+        surface_b = get_arg(args, 9, kwargs.get("surface_b", 0.0))
+        year = get_arg(args, 10, kwargs.get("year", 2023))
+        gender = get_arg(args, 11, kwargs.get("gender", "atp"))
+
         hist = self.odds_provider.get_match_odds(player_a, player_b, year, gender)
         if not hist:
             return None

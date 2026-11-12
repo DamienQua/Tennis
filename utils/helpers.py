@@ -60,3 +60,7 @@ class DateHelper:
             except (ValueError, IndexError):
                 date_i -= 1
         return 0
+
+def get_arg(args, index, fallback=None):
+    """Retrieve an element from args if available, otherwise return fallback."""
+    return args[index] if len(args) > index else fallback

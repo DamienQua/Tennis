@@ -39,7 +39,7 @@ class EloFetcher:
 _FETCH_CACHE = EloFetcher.cache
 fetch_data = EloFetcher.fetch_data
 
-async def ELO_table(m_w: str) -> str:
+async def elo_table(m_w: str) -> str:
     table = ""
     elo = ""
     user_agent = (
@@ -61,3 +61,5 @@ async def ELO_table(m_w: str) -> str:
             elo += table
     
     return elo
+
+ELO_table = elo_table

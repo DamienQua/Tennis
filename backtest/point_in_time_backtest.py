@@ -199,15 +199,11 @@ class PointInTimeBacktester:
         return combined
 
     @staticmethod
-    def _estimate_model_odds(
-        surf_a: float,
-        surf_b: float,
-        rank_a: float,
-        rank_b: float,
-        form_a: float,
-        form_b: float
-    ) -> Tuple[float, float]:
+    def _estimate_model_odds(*args, **kwargs) -> Tuple[float, float]:
         """Estimate model odds based on player surface %, ranking, and recent form."""
+        surf_a, surf_b = args[0], args[1]
+        rank_a, rank_b = args[2], args[3]
+        form_a, form_b = args[4], args[5]
         # Score components (60% surface/form, 40% ranking ratio)
         diff_surf = (surf_a - surf_b) * 0.4
         diff_form = (form_a - form_b) * 0.3
@@ -275,15 +271,8 @@ class PointInTimeBacktester:
         return 0.0
 
     @staticmethod
-    def _build_record(
-        info: Dict[str, Any],
-        models: Tuple[float, float],
-        books: Tuple[float, float],
-        elos: Tuple[float, float],
-        surfs: Tuple[float, float],
-        status: str,
-        bet: Optional[BetRecord]
-    ) -> Dict[str, Any]:
+    def _build_record(*args, **kwargs) -> Dict[str, Any]:
+        info, models, books, elos, surfs, status, bet = args[:7]
         return {
             "date": info["date"],
             "tournament": info["tour"],

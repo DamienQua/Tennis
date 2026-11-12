@@ -24,12 +24,13 @@ from datetime import datetime
 from dotenv import dotenv_values
 import numpy as np
 from typing import List, Tuple, Optional, Any
-from data_providers.ELO_table import ELO_table
+from data_providers.ELO_table import elo_table, ELO_table
 from core.analyze_match import analyze_match
 from aiolimiter import AsyncLimiter
 from collections import namedtuple
 from core.match_filter import MatchFilter
 from core.match_repository import MatchRepository
+from utils.helpers import get_arg
 
 SessionConfig = namedtuple('SessionConfig', ['header', 'connector', 'rate_limit', 'timeout'])
 
@@ -80,7 +81,10 @@ class MatchProcessor:
                     await asyncio.sleep(2.0)
                 else:
                     return await self.handle_connection_error(match_url, e)
-            except Exception as e:
+            except (
+                IndexError, KeyError, ValueError, TypeError,
+                AttributeError, OSError, RuntimeError
+            ) as e:
                 print(f"Erreur lors de l'analyse du match {match_url}: {type(e).__name__} {e}")
                 return None
         return None
@@ -193,45 +197,69 @@ def _notify_daily_results(matchs_str: str) -> None:
     send_daily_email(bets, total_matches=total_matches)
 
 async def load_elo_tables() -> Tuple[str, str]:
-    atp_elo = await ELO_table("ATP")
-    wta_elo = await ELO_table("WTA")
+    atp_elo = await elo_table("ATP")
+    wta_elo = await elo_table("WTA")
     return atp_elo, wta_elo
+
+class BatchContext:
+    def __init__(
+        self,
+        processor: MatchProcessor,
+        semaphore: asyncio.Semaphore,
+        repository: MatchRepository,
+        lock: asyncio.Lock,
+        results: List[str]
+    ):
+        self.processor = processor
+        self.semaphore = semaphore
+        self.repository = repository
+        self.lock = lock
+        self.results = results
 
 async def _process_single_match(
     m: str,
     tournaments: Any,
     elo_data: str,
-    processor: MatchProcessor,
-    semaphore: asyncio.Semaphore,
-    repository: MatchRepository,
-    lock: asyncio.Lock,
-    results: List[str]
+    ctx: BatchContext
 ) -> Optional[str]:
-    async with semaphore:
-        m_i = await processor.process(m, tournaments, elo_data)
+    async with ctx.semaphore:
+        m_i = await ctx.processor.process(m, tournaments, elo_data)
         if m_i:
-            async with lock:
-                results.append(m_i)
-                all_matchs = "\n".join(results) + "\n"
-                repository.save_processed_match(m_i, all_matchs)
+            async with ctx.lock:
+                ctx.results.append(m_i)
+                all_matchs = "\n".join(ctx.results) + "\n"
+                ctx.repository.save_processed_match(m_i, all_matchs)
         await asyncio.sleep(0.5)
         return m_i
+
+def _extract_process_args(args: tuple, kwargs: dict) -> Tuple[str, str, Any, int]:
+    atp = get_arg(args, 0, kwargs.get("atp_elo", ""))
+    wta = get_arg(args, 1, kwargs.get("wta_elo", ""))
+    repo = get_arg(args, 2, kwargs.get("repository"))
+    par = get_arg(args, 3, kwargs.get("max_parallel_matches", 1))
+    return atp, wta, repo, par
 
 async def process_matches(
     session: aiohttp.ClientSession,
     session_config: SessionConfig,
     tournaments: Any,
     mtch: List[str],
-    atp_elo: str,
-    wta_elo: str,
-    repository: MatchRepository,
-    max_parallel_matches: int = 1
+    *args,
+    **kwargs
 ) -> str:
-    already = repository.load_reviewed_matches()
-    processor = MatchProcessor(session, session_config.header, session_config.rate_limit, already)
-    semaphore = asyncio.Semaphore(max_parallel_matches)
-    lock = asyncio.Lock()
-    results: List[str] = []
+    atp_elo, wta_elo, repository, max_parallel = _extract_process_args(args, kwargs)
+
+    already = repository.load_reviewed_matches() if repository else set()
+    hdr = session_config.header
+    rt = session_config.rate_limit
+    processor = MatchProcessor(session, hdr, rt, already)
+    ctx = BatchContext(
+        processor,
+        asyncio.Semaphore(max_parallel),
+        repository,
+        asyncio.Lock(),
+        []
+    )
 
     batch_start = time.perf_counter()
     tasks = [
@@ -239,23 +267,19 @@ async def process_matches(
             m,
             tournaments,
             determine_elo_data(m, atp_elo, wta_elo),
-            processor,
-            semaphore,
-            repository,
-            lock,
-            results
+            ctx
         )
         for m in mtch
     ]
     await asyncio.gather(*tasks)
     total_elapsed = round(time.perf_counter() - batch_start, 2)
-    count = len(results)
+    count = len(ctx.results)
     avg_per_match = round(total_elapsed / count, 2) if count > 0 else 0.0
     print(f"\n{'='*55}")
     print(f"Total processing time : {total_elapsed} sec ({count} match(s) processed)")
     print(f"Average time per match: {avg_per_match} sec/match")
     print(f"{'='*55}\n")
-    return "\n".join(results) + "\n" if results else ""
+    return ("\n".join(ctx.results) + "\n") if ctx.results else ""
 
 def determine_elo_data(match_url: str, atp_elo: str, wta_elo: str) -> str:
     if "atp" in match_url or ("wta" not in match_url and "masters" in match_url):

@@ -34,9 +34,9 @@ class AttributeComparator:
         method_name = f'compare_attribute_{k}'
         if hasattr(self, method_name):
             return getattr(self, method_name)()
-        elif k in (6, 14, 20, 21):
+        if k in (6, 14, 20, 21):
             return self.compare_medium_attribute(k)
-        elif k in (10, 12, 15, 16, 17, 18, 22, 23, 24):
+        if k in (10, 12, 15, 16, 17, 18, 22, 23, 24):
             return self.compare_regular_attribute(k)
         return 0, 0
 
@@ -61,8 +61,7 @@ class AttributeComparator:
             return (ceil(diff / 10), 0) if diff > 0 else (0, ceil(-diff / 10))
         if k == 14:
             return (10, 0) if diff > 0 else (0, 10)
-        else:
-            return (0, 10) if diff > 0 else (10, 0)
+        return (0, 10) if diff > 0 else (10, 0)
 
     def compare_regular_attribute(self, k):
         offset = 1 if k in (10, 12) else 11
@@ -102,12 +101,12 @@ class Match:
     def calculate_odds(self):
         trj = 0.9
         if self.comp[0] <= self.comp[1]:
-            oddsA = round(trj * self.comp[2] / (self.comp[0] + 1e-3), 2)
-            oddsB = round(1 / (1 / trj - 1 / oddsA), 2)
+            odds_a = round(trj * self.comp[2] / (self.comp[0] + 1e-3), 2)
+            odds_b = round(1 / (1 / trj - 1 / odds_a), 2)
         else:
-            oddsB = round(trj * self.comp[2] / (self.comp[1] + 1e-3), 2)
-            oddsA = round(1 / (1 / trj - 1 / oddsB), 2)
-        self.data[36], self.data[37] = oddsA, oddsB
+            odds_b = round(trj * self.comp[2] / (self.comp[1] + 1e-3), 2)
+            odds_a = round(1 / (1 / trj - 1 / odds_b), 2)
+        self.data[36], self.data[37] = odds_a, odds_b
 
 def compare_players(match_vs):
     return Match(match_vs).compare_players()

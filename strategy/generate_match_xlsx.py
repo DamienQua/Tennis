@@ -114,7 +114,7 @@ def _get_max_column_length(column):
             cell_length = len(str(cell.value))
             if cell_length > max_length:
                 max_length = cell_length
-        except:
+        except (TypeError, AttributeError):
             pass
     return max_length
 

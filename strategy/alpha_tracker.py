@@ -8,10 +8,11 @@ Ensures deduplication and professional formatting for easy performance tracking.
 
 import os
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from utils.helpers import get_arg
 
 TRACKING_FILE = "Paris_Alpha_5_Plus.xlsx"
 SESSION_BETS: List[Dict[str, Any]] = []
@@ -62,7 +63,7 @@ def _create_or_load_wb(filepath: str):
             wb = openpyxl.load_workbook(filepath)
             sheet = wb.active
             return wb, sheet
-        except Exception:
+        except (openpyxl.utils.exceptions.InvalidFileException, OSError, KeyError, ValueError):
             pass
     wb = openpyxl.Workbook()
     sheet = wb.active
@@ -93,14 +94,8 @@ def _is_duplicate(sheet, match_url: str, p1: str, p2: str) -> bool:
             return True
     return False
 
-def _build_row(
-    tournament: str,
-    surface: str,
-    p1: str,
-    p2: str,
-    alpha_res: Dict[str, Any],
-    match_url: str
-):
+def _build_row(meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match_url: str):
+    tournament, surface, p1, p2 = meta
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
     prob_str = f"{alpha_res.get('model_prob', 0.0) * 100:.1f}%"
     ev_str = f"{alpha_res.get('ev_percent', 0.0):+.1f}%"
@@ -148,7 +143,10 @@ def _auto_fit_columns(sheet):
         col_letter = get_column_letter(col[0].column)
         sheet.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-def _append_session_bet(tournament, surface, p1, p2, alpha_res, match_url):
+def _append_session_bet(
+    meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match_url: str
+):
+    tournament, surface, p1, p2 = meta
     SESSION_BETS.append({
         "tournament": tournament,
         "surface": surface,
@@ -163,29 +161,41 @@ def _append_session_bet(tournament, surface, p1, p2, alpha_res, match_url):
         "match_url": match_url
     })
 
+def _extract_selection_args(args: tuple, kwargs: dict) -> Tuple[Any, ...]:
+    t = get_arg(args, 0, kwargs.get("tournament", ""))
+    s = get_arg(args, 1, kwargs.get("surface", ""))
+    p1 = get_arg(args, 2, kwargs.get("player1", ""))
+    p2 = get_arg(args, 3, kwargs.get("player2", ""))
+    res = get_arg(args, 4, kwargs.get("alpha_res", {}))
+    url = kwargs.get("match_url", get_arg(args, 5, ""))
+    path = kwargs.get("filepath", get_arg(args, 6, TRACKING_FILE))
+    return t, s, p1, p2, res, url, path
+
 def record_alpha_selection(
-    tournament: str,
-    surface: str,
-    player1: str,
-    player2: str,
-    alpha_res: Dict[str, Any],
+    *args,
     match_url: str = "",
-    filepath: str = TRACKING_FILE
+    filepath: str = TRACKING_FILE,
+    **kwargs
 ) -> bool:
+    kwargs.setdefault("match_url", match_url)
+    kwargs.setdefault("filepath", filepath)
+    tournament, surface, p1, p2, alpha_res, url, path = _extract_selection_args(args, kwargs)
+
     if not alpha_res.get("bet_recommended"):
         return False
 
-    _append_session_bet(tournament, surface, player1, player2, alpha_res, match_url)
-    wb, sheet = _create_or_load_wb(filepath)
+    meta = (tournament, surface, p1, p2)
+    _append_session_bet(meta, alpha_res, url)
+    wb, sheet = _create_or_load_wb(path)
 
-    if _is_duplicate(sheet, match_url, player1, player2):
+    if _is_duplicate(sheet, url, p1, p2):
         return False
 
-    row_data = _build_row(tournament, surface, player1, player2, alpha_res, match_url)
+    row_data = _build_row(meta, alpha_res, url)
     sheet.append(row_data)
     _style_appended_row(sheet, sheet.max_row)
     _auto_fit_columns(sheet)
 
-    wb.save(filepath)
-    print(f"  💾 Sélection sauvegardée dans '{filepath}' (Ligne {sheet.max_row})")
+    wb.save(path)
+    print(f"  💾 Sélection sauvegardée dans '{path}' (Ligne {sheet.max_row})")
     return True

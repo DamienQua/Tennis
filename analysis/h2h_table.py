@@ -15,8 +15,6 @@ generation.
 """
 
 import re
-import asyncio
-import aiohttp
 from analysis.indice_confiance import indice_confiance
 from analysis.h2h_stats import H2HStats, DateUtils
 from utils.variables import indice_tab
@@ -27,19 +25,6 @@ class MatchContext:
         self.admin_url = admin_url
         self.header = header
         self.match_id = match_id
-
-async def fetch_data(session, url, data=None):
-    max_retries = 2
-    for attempt in range(max_retries):
-        try:
-            async with session.post(url, data=data) as response:
-                return await response.text()
-        except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
-            if attempt < max_retries - 1:
-                await asyncio.sleep(1.0)
-            else:
-                raise
-    return ""
 
 class H2HDataProcessor:
     def __init__(self, data, match_vs):
@@ -66,7 +51,7 @@ class H2HDataProcessor:
                 split_series = self.data.text.strip().split("series ")[1]
                 val = split_series.split(" ")[ind].split("-")[i].split("\n")[0]
                 self.stats.h2h_nb += int(val)
-            except Exception:
+            except (IndexError, ValueError):
                 pass
 
         if self.stats.h2h_nb == 0:
@@ -86,7 +71,7 @@ class H2HDataProcessor:
                 .replace("w/o", "")
                 .strip()
             )
-        except Exception:
+        except (IndexError, AttributeError):
             score = "0-0 0-0"
         return date_ms, surface_m, winner, score
 
@@ -123,9 +108,9 @@ async def h2h_table(data, match_vs, session, match_context: MatchContext, indice
     processor = H2HDataProcessor(data, match_vs)
     processor.process_h2h_data()
 
-    if processor.stats.winA_sur > 0:
+    if processor.stats.win_a_sur > 0:
         indice_tab[4] = 2*indice_tab[1]
-    if processor.stats.winB_sur > 0:
+    if processor.stats.win_b_sur > 0:
         indice_tab[5] = 2*indice_tab[3]
 
     if processor.go != "":

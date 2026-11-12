@@ -48,14 +48,10 @@ def _format_diff(val: float, is_valid: bool) -> str:
     return f"{val:+0.0f}"
 
 def _build_bet_result(
-    player: str,
-    index: int,
-    book: float,
-    model: float,
-    prob: float,
-    ev: float,
-    elo_diff: float
+    player: str, index: int, odds: Tuple[float, float, float], metrics: Tuple[float, float]
 ) -> Dict[str, Any]:
+    book, model, prob = odds
+    ev, elo_diff = metrics
     return {
         "bet_recommended": True,
         "selected_player": player,
@@ -89,11 +85,11 @@ def _build_no_bet_result(data_valid: bool) -> Dict[str, Any]:
 def _assemble_final_dict(
     base: Dict[str, Any],
     data_valid: bool,
-    ev_1: float,
-    ev_2: float,
-    diff_1: float,
-    diff_2: float
+    ev_pair: Tuple[float, float],
+    diff_pair: Tuple[float, float]
 ) -> Dict[str, Any]:
+    ev_1, ev_2 = ev_pair
+    diff_1, diff_2 = diff_pair
     base["ev_j1_str"] = _format_pct(ev_1, data_valid)
     base["ev_j2_str"] = _format_pct(ev_2, data_valid)
     base["elo_diff_j1_str"] = _format_diff(diff_1, data_valid)
@@ -116,24 +112,32 @@ def format_alpha_summary(res: Dict[str, Any]) -> str:
         f"(EV J1: {res.get('ev_j1_str', '-')}, EV J2: {res.get('ev_j2_str', '-')})"
     )
 
-def _is_valid_input(m1: float, m2: float, b1: float, b2: float, e1: float, e2: float) -> bool:
-    return (min(m1, m2, b1, b2) > 1.01) and (min(e1, e2) > 0)
+def _is_valid_input(odds: Tuple[float, ...], elos: Tuple[float, ...]) -> bool:
+    return (min(odds) > 1.01) and (min(elos) > 0)
 
 def evaluate_alpha_strategy(
-    model_1: Any,
-    model_2: Any,
-    book_1: Any,
-    book_2: Any,
-    elo_1: Any,
-    elo_2: Any,
+    *args,
     player_1: str = "Joueur 1",
-    player_2: str = "Joueur 2"
+    player_2: str = "Joueur 2",
+    **kwargs
 ) -> Dict[str, Any]:
+    if len(args) >= 8:
+        model_1, model_2, book_1, book_2, elo_1, elo_2, player_1, player_2 = args[:8]
+    elif len(args) == 6:
+        model_1, model_2, book_1, book_2, elo_1, elo_2 = args
+    else:
+        model_1 = kwargs.get("model_1", 0.0)
+        model_2 = kwargs.get("model_2", 0.0)
+        book_1 = kwargs.get("book_1", 0.0)
+        book_2 = kwargs.get("book_2", 0.0)
+        elo_1 = kwargs.get("elo_1", 0.0)
+        elo_2 = kwargs.get("elo_2", 0.0)
+
     m1, m2 = _safe_float(model_1), _safe_float(model_2)
     b1, b2 = _safe_float(book_1), _safe_float(book_2)
     e1, e2 = _safe_float(elo_1), _safe_float(elo_2)
 
-    data_valid = _is_valid_input(m1, m2, b1, b2, e1, e2)
+    data_valid = _is_valid_input((m1, m2, b1, b2), (e1, e2))
     p1, p2 = _calculate_probabilities(m1, m2)
     diff_1, diff_2 = e1 - e2, e2 - e1
 
@@ -141,10 +145,10 @@ def evaluate_alpha_strategy(
     ok_2, ev_2 = _check_candidate(p2, b2, diff_2)
 
     if ok_1:
-        base = _build_bet_result(player_1, 1, b1, m1, p1, ev_1, diff_1)
+        base = _build_bet_result(player_1, 1, (b1, m1, p1), (ev_1, diff_1))
     elif ok_2:
-        base = _build_bet_result(player_2, 2, b2, m2, p2, ev_2, diff_2)
+        base = _build_bet_result(player_2, 2, (b2, m2, p2), (ev_2, diff_2))
     else:
         base = _build_no_bet_result(data_valid)
 
-    return _assemble_final_dict(base, data_valid, ev_1, ev_2, diff_1, diff_2)
+    return _assemble_final_dict(base, data_valid, (ev_1, ev_2), (diff_1, diff_2))

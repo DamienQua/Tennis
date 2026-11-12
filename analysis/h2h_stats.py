@@ -11,15 +11,86 @@ class DateUtils:
         year_ms = 365.25 * 24 * 3600
         return today - date_ms <= year_ms
 
+class PlayerH2H:
+    """Stores head-to-head match and game metrics for an individual player."""
+    def __init__(self):
+        self.wins_all = 0
+        self.wins_year = 0
+        self.wins_surface = 0
+        self.games = 0
+
 class H2HStats:
     def __init__(self, player_a, player_b):
         self.player_a = player_a
         self.player_b = player_b
-        self.winA_all = self.winB_all = 0
-        self.winA_y = self.winB_y = 0
-        self.winA_sur = self.winB_sur = 0
-        self.winA_G = self.winB_G = 0
-        self.h2h_nb = self.h2h_y = 0
+        self.p_a = PlayerH2H()
+        self.p_b = PlayerH2H()
+        self.h2h_nb = 0
+        self.h2h_y = 0
+
+    @property
+    def win_a_all(self):
+        return self.p_a.wins_all
+
+    @win_a_all.setter
+    def win_a_all(self, val):
+        self.p_a.wins_all = val
+
+    @property
+    def win_b_all(self):
+        return self.p_b.wins_all
+
+    @win_b_all.setter
+    def win_b_all(self, val):
+        self.p_b.wins_all = val
+
+    @property
+    def win_a_y(self):
+        return self.p_a.wins_year
+
+    @win_a_y.setter
+    def win_a_y(self, val):
+        self.p_a.wins_year = val
+
+    @property
+    def win_b_y(self):
+        return self.p_b.wins_year
+
+    @win_b_y.setter
+    def win_b_y(self, val):
+        self.p_b.wins_year = val
+
+    @property
+    def win_a_sur(self):
+        return self.p_a.wins_surface
+
+    @win_a_sur.setter
+    def win_a_sur(self, val):
+        self.p_a.wins_surface = val
+
+    @property
+    def win_b_sur(self):
+        return self.p_b.wins_surface
+
+    @win_b_sur.setter
+    def win_b_sur(self, val):
+        self.p_b.wins_surface = val
+
+    @property
+    def win_a_g(self):
+        return self.p_a.games
+
+    @win_a_g.setter
+    def win_a_g(self, val):
+        self.p_a.games = val
+
+    @property
+    def win_b_g(self):
+        return self.p_b.games
+
+    @win_b_g.setter
+    def win_b_g(self, val):
+        self.p_b.games = val
 
     def update_stats(self, winner, date_ms, surface, score, current_surface):
         if winner in self.player_a:
@@ -28,37 +99,37 @@ class H2HStats:
             self._update_player_b_stats(date_ms, surface, score, current_surface)
 
     def _update_player_a_stats(self, date_ms, surface, score, current_surface):
-        self.winA_all += 1
+        self.p_a.wins_all += 1
         if DateUtils.is_within_last_year(date_ms):
-            self.winA_y += 1
+            self.p_a.wins_year += 1
             self.h2h_y += 1
         if current_surface in surface:
-            self.winA_sur += 1
+            self.p_a.wins_surface += 1
         self._update_game_stats(score, 0)
 
     def _update_player_b_stats(self, date_ms, surface, score, current_surface):
-        self.winB_all += 1
+        self.p_b.wins_all += 1
         if DateUtils.is_within_last_year(date_ms):
-            self.winB_y += 1
+            self.p_b.wins_year += 1
             self.h2h_y += 1
         if current_surface in surface:
-            self.winB_sur += 1
+            self.p_b.wins_surface += 1
         self._update_game_stats(score, 1)
 
     def _update_game_stats(self, score, loser_index):
         for set_score in score.split(" "):
             try:
-                self.winA_G += int(set_score.split("-")[loser_index])
-                self.winB_G += int(set_score.split("-")[1-loser_index])
-            except:
+                self.p_a.games += int(set_score.split("-")[loser_index])
+                self.p_b.games += int(set_score.split("-")[1-loser_index])
+            except (ValueError, IndexError):
                 pass
 
     def calculate_percentages(self):
         return {
-            "all_time": self._calculate_percentage(self.winA_all, self.winB_all),
-            "last_year": self._calculate_percentage(self.winA_y, self.winB_y),
-            "surface": self._calculate_percentage(self.winA_sur, self.winB_sur),
-            "games": self._calculate_percentage(self.winA_G, self.winB_G)
+            "all_time": self._calculate_percentage(self.p_a.wins_all, self.p_b.wins_all),
+            "last_year": self._calculate_percentage(self.p_a.wins_year, self.p_b.wins_year),
+            "surface": self._calculate_percentage(self.p_a.wins_surface, self.p_b.wins_surface),
+            "games": self._calculate_percentage(self.p_a.games, self.p_b.games)
         }
 
     def _calculate_percentage(self, wins_a, wins_b):

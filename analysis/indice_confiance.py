@@ -26,27 +26,7 @@ from datetime import date
 from utils.variables import indice_tab
 from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
 from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
-
-class TennisDataFetcher:
-    def __init__(self, session):
-        self.session = session
-
-    async def fetch_data(self, url, data=None, method='POST'):
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                if method == 'POST':
-                    async with self.session.post(url, data=data) as response:
-                        return await response.text()
-                else:
-                    async with self.session.get(url) as response:
-                        return await response.text()
-            except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1.0)
-                else:
-                    raise
-        return ""
+from analysis.last_matchs import TennisDataFetcher
 
 class MotivationAnalyzer:
     def __init__(self, data_fetcher, admin_url, indice_tab):
@@ -67,7 +47,7 @@ class MotivationAnalyzer:
         await self.analyze_surface_performance(match_id, surface, flag)        
 
     async def fetch_player_activity(self, player_id, match_id):
-        pAB_param = {
+        player_param = {
             "action": "playerActivity",
             "activityOffset": "0",
             "basic-activity-option": "3",
@@ -76,7 +56,7 @@ class MotivationAnalyzer:
             "playerID": player_id,
             "matchID": match_id
         }
-        return await self.data_fetcher.fetch_data(self.admin_url, pAB_param)
+        return await self.data_fetcher.fetch_data(self.admin_url, player_param)
 
     def get_tournament_category(self, data):
         try:
@@ -85,7 +65,7 @@ class MotivationAnalyzer:
                 subheaders = table.find_all(class_="subheader")
                 if subheaders:
                     return subheaders[0].text
-        except Exception:
+        except (AttributeError, IndexError):
             pass
         return "250"
 
@@ -116,7 +96,7 @@ class MotivationAnalyzer:
             if start_index == -1:
                 return -1
             return self._count_matches_in_year(show_class, start_index)
-        except Exception:
+        except (AttributeError, IndexError, TypeError):
             return -1
 
     def calculate_motivation_index(self, cat, nb_matchs, flag):
@@ -173,10 +153,15 @@ class TacticsAnalyzer:
         stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, req)
         return BeautifulSoup(stats_match_html, "lxml")
 
-async def indice_confiance(
-    session, admin_url, player_id, match_id, surface, flag, choix,
-    match_url="", indice_tab=None
-):
+async def indice_confiance(*args, match_url="", indice_tab=None, **kwargs):
+    session, admin_url, player_id, match_id, surface, flag, choix = args[:7]
+    if len(args) > 7:
+        match_url = args[7]
+    if len(args) > 8:
+        indice_tab = args[8]
+    match_url = kwargs.get("match_url", match_url)
+    indice_tab = kwargs.get("indice_tab", indice_tab)
+
     if indice_tab is None:
         from utils.variables import indice_tab as default_tab
         indice_tab = default_tab

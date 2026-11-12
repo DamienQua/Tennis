@@ -15,9 +15,9 @@ import pandas as pd
 from typing import Dict, Any, List, Optional
 from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator, BetRecord
-from backtest.backtest_engine import BacktestResult, BacktestEngine
+from backtest.backtest_engine import BacktestResult, BacktestEngine, print_backtest_summary
 from data_providers.elo_matcher import EloMatcher
-from data_providers.ELO_table import ELO_table
+from data_providers.ELO_table import elo_table
 
 def _extract_match_data(ws: Any) -> Optional[Dict[str, Any]]:
     p1 = ws.cell(1, 2).value
@@ -64,7 +64,7 @@ def _process_file(
             year=2023,
             gender=gender
         )
-    except Exception:
+    except (OSError, KeyError, ValueError, TypeError, IndexError):
         pass
 
 def _process_tournament(
@@ -93,25 +93,17 @@ async def consolidate_january():
         historical_odds=odds_provider, evaluator=evaluator, output_dir="backtest/results"
     )
 
-    atp_elo, wta_elo = await asyncio.gather(ELO_table("ATP"), ELO_table("WTA"))
+    atp_elo, wta_elo = await asyncio.gather(elo_table("ATP"), elo_table("WTA"))
     print(f"Consolidating backtest results from {len(tour_folders)} tournaments...")
 
     total_files = sum(_process_tournament(td, atp_elo, wta_elo, engine) for td in tour_folders)
 
     summary = engine.evaluator.get_summary()
     saved_path = engine.export_summary("january_2023_consolidated_backtest.xlsx")
-
-    print("\n" + "=" * 60)
-    print("🏆 BILAN CONSOLIDÉ - JANVIER 2023 (TOUS TOURNOIS)")
-    print(f"Total Fichiers Analysés : {total_files}")
-    print(f"Total Matchs Matchés   : {len(engine.results)}")
-    print(f"Total Paris Déclenchés  : {summary['total_bets']}")
-    print(f"Paris Gagnés / Perdus   : {summary['wins']} / {summary['losses']}")
-    print(f"Taux de Réussite        : {summary['win_rate']}%")
-    print(f"P&L Total               : {summary['total_pnl']} unités")
-    print(f"ROI                     : {summary['roi_percent']}%")
-    print(f"Rapport consolidé dans  : {saved_path}")
-    print("=" * 60 + "\n")
+    print_backtest_summary(
+        summary, len(engine.results), saved_path,
+        title="BILAN CONSOLIDÉ - JANVIER 2023 (TOUS TOURNOIS)"
+    )
 
 if __name__ == "__main__":
     asyncio.run(consolidate_january())

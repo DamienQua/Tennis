@@ -44,10 +44,9 @@ class IndiceComparator:
 def calculate_indice_24(comp, match_vs):
     if match_vs[36] < match_vs[37]:
         return _calculate_indice_24_helper(comp[0], comp[2])
-    elif match_vs[36] > match_vs[37]:
+    if match_vs[36] > match_vs[37]:
         return _calculate_indice_24_helper(comp[1], comp[2])
-    else:
-        return 1
+    return 1
 
 def _calculate_indice_24_helper(comp_value, comp_total):
     if comp_total <= 0:
@@ -55,12 +54,11 @@ def _calculate_indice_24_helper(comp_value, comp_total):
     ratio = comp_value / comp_total
     if 0 <= ratio < 0.25:
         return 0.5
-    elif 0.25 <= ratio < 0.5:
+    if 0.25 <= ratio < 0.5:
         return 1
-    elif 0.5 <= ratio < 0.75:
+    if 0.5 <= ratio < 0.75:
         return 2
-    else:
-        return 3
+    return 3
 
 def compare_indice(indice_tab, match_vs):
     comparator = IndiceComparator(indice_tab)

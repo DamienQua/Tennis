@@ -18,19 +18,22 @@ class BetRecord:
         match_name: str,
         tournament: str,
         bet_on: str,
-        model_odds: float,
-        market_odds: float,
-        won: bool,
-        stake: float = 1.0
+        *args,
+        **kwargs
     ):
         self.match_name = match_name
         self.tournament = tournament
         self.bet_on = bet_on
-        self.model_odds = model_odds
-        self.market_odds = market_odds
-        self.won = won
-        self.stake = stake
-        self.pnl = round(stake * (market_odds - 1), 2) if won else -round(stake, 2)
+        self.model_odds = args[0] if len(args) > 0 else kwargs.get("model_odds", 0.0)
+        self.market_odds = args[1] if len(args) > 1 else kwargs.get("market_odds", 0.0)
+        self.won = args[2] if len(args) > 2 else kwargs.get("won", False)
+        self.stake = args[3] if len(args) > 3 else kwargs.get("stake", 1.0)
+
+    @property
+    def pnl(self) -> float:
+        if self.won:
+            return round(self.stake * (self.market_odds - 1), 2)
+        return -round(self.stake, 2)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -50,6 +53,14 @@ def _to_float(val: Any) -> float:
     except (ValueError, TypeError):
         return 0.0
 
+def _parse_confluence_metrics(args: tuple):
+    return (
+        _to_float(args[0]), _to_float(args[1]),
+        _to_float(args[2]), _to_float(args[3]),
+        _to_float(args[4]), _to_float(args[5]),
+        _to_float(args[6]), _to_float(args[7])
+    )
+
 class StrategyEvaluator:
     """Evaluates betting performance across a collection of match predictions."""
 
@@ -59,114 +70,39 @@ class StrategyEvaluator:
         self.bets: List[BetRecord] = []
 
     @staticmethod
-    def _is_ok_j1(
-        excel_j1: float,
-        excel_j2: float,
-        book_j1: float,
-        book_j2: float,
-        elo_j1: float,
-        elo_j2: float,
-        surface_j1: float,
-        surface_j2: float
-    ) -> bool:
-        ej1, ej2 = _to_float(excel_j1), _to_float(excel_j2)
-        bj1, bj2 = _to_float(book_j1), _to_float(book_j2)
-        el1, el2 = _to_float(elo_j1), _to_float(elo_j2)
-        s1, s2 = _to_float(surface_j1), _to_float(surface_j2)
-
-        return (
-            ej1 < ej2 and
-            bj1 < bj2 and
-            el1 > el2 and
-            s1 > s2 and
-            bj1 > ej1
-        )
+    def _is_ok_j1(*args, **kwargs) -> bool:
+        ej1, ej2, bj1, bj2, el1, el2, s1, s2 = _parse_confluence_metrics(args)
+        return ej1 < ej2 and bj1 < bj2 and el1 > el2 and s1 > s2 and bj1 > ej1
 
     @staticmethod
-    def _is_ok_j2(
-        excel_j1: float,
-        excel_j2: float,
-        book_j1: float,
-        book_j2: float,
-        elo_j1: float,
-        elo_j2: float,
-        surface_j1: float,
-        surface_j2: float
-    ) -> bool:
-        ej1, ej2 = _to_float(excel_j1), _to_float(excel_j2)
-        bj1, bj2 = _to_float(book_j1), _to_float(book_j2)
-        el1, el2 = _to_float(elo_j1), _to_float(elo_j2)
-        s1, s2 = _to_float(surface_j1), _to_float(surface_j2)
-
-        return (
-            ej1 > ej2 and
-            bj1 > bj2 and
-            el1 < el2 and
-            s1 < s2 and
-            bj2 > ej2
-        )
+    def _is_ok_j2(*args, **kwargs) -> bool:
+        ej1, ej2, bj1, bj2, el1, el2, s1, s2 = _parse_confluence_metrics(args)
+        return ej1 > ej2 and bj1 > bj2 and el1 < el2 and s1 < s2 and bj2 > ej2
 
     @classmethod
-    def evaluate_confluence(
-        cls,
-        excel_j1: float,
-        excel_j2: float,
-        book_j1: float,
-        book_j2: float,
-        elo_j1: float,
-        elo_j2: float,
-        surface_j1: float,
-        surface_j2: float
-    ) -> str:
-        if cls._is_ok_j1(
-            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
-        ):
+    def evaluate_confluence(cls, *args, **kwargs) -> str:
+        if cls._is_ok_j1(*args, **kwargs):
             return "OK J1"
-        if cls._is_ok_j2(
-            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
-        ):
+        if cls._is_ok_j2(*args, **kwargs):
             return "OK J2"
         return "PAS OK"
 
     @classmethod
-    def evaluate_alpha_5_plus(
-        cls,
-        model_1: Any,
-        model_2: Any,
-        book_1: Any,
-        book_2: Any,
-        elo_1: Any,
-        elo_2: Any,
-        player_1: str = "J1",
-        player_2: str = "J2"
-    ) -> Dict[str, Any]:
-        return evaluate_alpha_strategy(
-            model_1, model_2, book_1, book_2, elo_1, elo_2, player_1, player_2
-        )
+    def evaluate_alpha_5_plus(cls, *args, **kwargs) -> Dict[str, Any]:
+        return evaluate_alpha_strategy(*args, **kwargs)
 
     @classmethod
-    def evaluate_optimized_confluence(
-        cls,
-        excel_j1: float,
-        excel_j2: float,
-        book_j1: float,
-        book_j2: float,
-        elo_j1: float,
-        elo_j2: float,
-        surface_j1: float,
-        surface_j2: float,
-        surface: str = "Clay"
-    ) -> str:
+    def evaluate_optimized_confluence(cls, *args, surface: str = "Clay", **kwargs) -> str:
         s_clean = surface.lower()
         if "grass" in s_clean:
             return "PAS OK"
 
-        raw = cls.evaluate_confluence(
-            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
-        )
+        raw = cls.evaluate_confluence(*args[:8], **kwargs)
         if raw == "PAS OK":
             return "PAS OK"
 
+        elo_j1, elo_j2 = args[4], args[5]
+        book_j1, book_j2 = args[2], args[3]
         elo_diff = abs(_to_float(elo_j1) - _to_float(elo_j2))
         bet_odds = _to_float(book_j1) if raw == "OK J1" else _to_float(book_j2)
 
@@ -177,24 +113,12 @@ class StrategyEvaluator:
 
         return "PAS OK"
 
-    def evaluate_match_confluence(
-        self,
-        player_a: str,
-        player_b: str,
-        tournament: str,
-        excel_j1: float,
-        excel_j2: float,
-        book_j1: float,
-        book_j2: float,
-        elo_j1: float,
-        elo_j2: float,
-        surface_j1: float,
-        surface_j2: float,
-        winner: str
-    ) -> Any:
-        status = self.evaluate_confluence(
-            excel_j1, excel_j2, book_j1, book_j2, elo_j1, elo_j2, surface_j1, surface_j2
-        )
+    def evaluate_match_confluence(self, *args, **kwargs) -> Any:
+        player_a, player_b, tournament = args[0], args[1], args[2]
+        excel_j1, excel_j2, book_j1, book_j2 = args[3], args[4], args[5], args[6]
+        winner = args[11]
+
+        status = self.evaluate_confluence(*args[3:11], **kwargs)
         if status == "OK J1":
             won = (player_a == winner)
             record = BetRecord(
@@ -203,7 +127,7 @@ class StrategyEvaluator:
             )
             self.bets.append(record)
             return record
-        elif status == "OK J2":
+        if status == "OK J2":
             won = (player_b == winner)
             record = BetRecord(
                 f"{player_a} vs {player_b}", tournament, player_b,
@@ -213,16 +137,10 @@ class StrategyEvaluator:
             return record
         return None
 
-    def _check_value_bet(
-        self,
-        player_a: str,
-        player_b: str,
-        tournament: str,
-        candidate: str,
-        model_odds: float,
-        market_odds: float,
-        winner: str
-    ) -> Any:
+    def _check_value_bet(self, *args, **kwargs) -> Any:
+        player_a, player_b, tournament, candidate = args[0], args[1], args[2], args[3]
+        model_odds, market_odds, winner = args[4], args[5], args[6]
+
         if model_odds <= 1.01 or market_odds <= 1.01:
             return None
 

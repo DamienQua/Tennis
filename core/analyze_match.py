@@ -60,7 +60,7 @@ async def fetch_data(session, url, method='get', data=None):
                 return result
             if attempt < max_retries - 1:
                 await asyncio.sleep(1.0 * (attempt + 1))
-        except Exception:
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
             if attempt < max_retries - 1:
                 await asyncio.sleep(1.0 * (attempt + 1))
     return ""
@@ -89,9 +89,9 @@ def extract_player_ids(abc, soup_abc=None):
     ids = _ids_from_soup(soup_abc)
     if len(ids) < 2 and isinstance(abc, str):
         ids = _ids_from_regex(abc)
-    pA_id = ids[0] if len(ids) > 0 else ""
-    pB_id = ids[1] if len(ids) > 1 else ""
-    return pA_id, pB_id
+    player_a_id = ids[0] if len(ids) > 0 else ""
+    player_b_id = ids[1] if len(ids) > 1 else ""
+    return player_a_id, player_b_id
 
 def clean_player_name(name):
     cleaned = re.sub(r'^\s*[\(\[][A-Za-z0-9/]+[\)\]]\s*', '', name.strip())
@@ -103,10 +103,10 @@ def clean_player_name(name):
 def _names_from_title(soup_abc):
     titles = soup_abc.find_all(class_="profile-title")
     if len(titles) >= 2:
-        pA = clean_player_name(titles[0].text)
-        pB = clean_player_name(titles[1].text)
-        if pA and pB:
-            return pA, pB
+        player_a = clean_player_name(titles[0].text)
+        player_b = clean_player_name(titles[1].text)
+        if player_a and player_b:
+            return player_a, player_b
     return None
 
 def _names_from_links(soup_abc):
@@ -123,10 +123,10 @@ def _names_from_links(soup_abc):
 def _names_from_overview(data_text):
     for_parts = data_text.split("for ")
     if len(for_parts) >= 3:
-        pA = clean_player_name(for_parts[1].split("\n")[0])
-        pB = clean_player_name(for_parts[2].split("\n")[0])
-        if pA and pB:
-            return pA, pB
+        player_a = clean_player_name(for_parts[1].split("\n")[0])
+        player_b = clean_player_name(for_parts[2].split("\n")[0])
+        if player_a and player_b:
+            return player_a, player_b
     return None
 
 def _names_from_slug(match_url):
@@ -174,7 +174,7 @@ def parse_player_rankings(data):
         try:
             clean_txt = data.text.replace("Unknown", "1000")
             ranking = int(clean_txt.split("(HI")[i].split("\n")[-1].strip())
-        except Exception:
+        except (ValueError, IndexError, AttributeError):
             ranking = 1000
         rankings.append(ranking)
     return rankings
@@ -184,7 +184,7 @@ def who_is_favorite(data):
         left_val = float(data.find(class_="mp_bio_left").find_all("li")[-1].text.strip())
         right_val = float(data.find(class_="mp_bio_right").find_all("li")[-1].text.strip())
         return [1, 0] if left_val > right_val else [0, 1]
-    except Exception:
+    except (ValueError, IndexError, AttributeError):
         return [0, 0]
 
 async def analyze_match(session, header, match, tournaments, elo):
@@ -202,9 +202,9 @@ async def analyze_match(session, header, match, tournaments, elo):
     )
     soup_abc = BeautifulSoup(abc, "lxml")
     data = BeautifulSoup(overview_data, "lxml")
-    pA_id, pB_id = extract_player_ids(abc, soup_abc)
+    player_a_id, player_b_id = extract_player_ids(abc, soup_abc)
 
-    if not pA_id or not pB_id:
+    if not player_a_id or not player_b_id:
         print(f"⚠️ Identifiants joueurs introuvables pour {match} - match ignoré.")
         return ""
 
@@ -212,10 +212,10 @@ async def analyze_match(session, header, match, tournaments, elo):
     match_vs[0] = tour
     match_vs[1] = surface
 
-    pA, pB = extract_player_names(soup_abc, match, data.text)
-    match_vs[2], match_vs[3] = pA, pB
+    player_a, player_b = extract_player_names(soup_abc, match, data.text)
+    match_vs[2], match_vs[3] = player_a, player_b
 
-    odds_future = asyncio.create_task(fetch_both_odds(session, pA, pB))
+    odds_future = asyncio.create_task(fetch_both_odds(session, player_a, player_b))
 
     rankings = parse_player_rankings(data)
     match_vs[4], match_vs[5] = rankings[0], rankings[1]
@@ -225,13 +225,15 @@ async def analyze_match(session, header, match, tournaments, elo):
     # Phase 1: Motivation & surface performance (fills indice_tab[0:4]), plus recent match histories
     await asyncio.gather(
         indice_confiance(
-            session, admin_url, pA_id, match_id, surface, 0, "Motivation", indice_tab=indice_tab
+            session, admin_url, player_a_id, match_id, surface, 0, "Motivation",
+            indice_tab=indice_tab
         ),
         indice_confiance(
-            session, admin_url, pB_id, match_id, surface, 1, "Motivation", indice_tab=indice_tab
+            session, admin_url, player_b_id, match_id, surface, 1, "Motivation",
+            indice_tab=indice_tab
         ),
-        last_matchs(session, today, match_vs, admin_url, pA_id, match_id, 0, favorite),
-        last_matchs(session, today, match_vs, admin_url, pB_id, match_id, 1, favorite)
+        last_matchs(session, today, match_vs, admin_url, player_a_id, match_id, 0, favorite),
+        last_matchs(session, today, match_vs, admin_url, player_b_id, match_id, 1, favorite)
     )
 
     # Phase 2: Head-to-Head table (safely uses indice_tab[1] and indice_tab[3] computed in Phase 1)
@@ -246,12 +248,12 @@ async def analyze_match(session, header, match, tournaments, elo):
 
     compare_indice(indice_tab, match_vs)
 
-    elo_A, elo_B = EloMatcher.find_elo_ratings(elo, match_vs[2], match_vs[3], surface)
+    elo_a, elo_b = EloMatcher.find_elo_ratings(elo, match_vs[2], match_vs[3], surface)
 
-    if elo_A.replace(".","").isdigit():
-        match_vs[40] = elo_A
-    if elo_B.replace(".","").isdigit():
-        match_vs[41] = elo_B
+    if elo_a.replace(".","").isdigit():
+        match_vs[40] = elo_a
+    if elo_b.replace(".","").isdigit():
+        match_vs[41] = elo_b
 
     alpha_res = evaluate_alpha_strategy(
         match_vs[36], match_vs[37],

@@ -19,9 +19,9 @@ import numpy as np
 from backtest.tournament_crawler import TournamentCrawler
 from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator
-from backtest.backtest_engine import BacktestEngine
+from backtest.backtest_engine import BacktestEngine, print_backtest_summary
 from core.analyze_match import analyze_match
-from data_providers.ELO_table import ELO_table
+from data_providers.ELO_table import elo_table
 
 async def login(session: aiohttp.ClientSession) -> None:
     config = dotenv_values(".env")
@@ -56,17 +56,9 @@ def parse_match_metrics(result_str: str) -> Dict[str, Any]:
         "surface_b": _safe_float(padded[14])
     }
 
-async def _analyze_single_match(
-    session: aiohttp.ClientSession,
-    header: dict,
-    match_url: str,
-    tournaments: Any,
-    elo_data: str,
-    semaphore: asyncio.Semaphore,
-    engine: BacktestEngine,
-    year: int,
-    gender: str
-) -> Optional[Any]:
+async def _analyze_single_match(*args, **kwargs) -> Optional[Any]:
+    session, header, match_url, tournaments = args[0], args[1], args[2], args[3]
+    elo_data, semaphore, engine, year, gender = args[4], args[5], args[6], args[7], args[8]
     async with semaphore:
         try:
             start = time.perf_counter()
@@ -91,9 +83,26 @@ async def _analyze_single_match(
             c_val = backtest_res.match_data.get("confluence", "N/A") if backtest_res else "SKIP"
             print(f"Match: {m['p_a']} vs {m['p_b']} | Status: {c_val} | Time: {elapsed}s")
             return backtest_res
-        except Exception as e:
+        except (
+            aiohttp.ClientError, asyncio.TimeoutError, OSError,
+            ValueError, KeyError, IndexError, AttributeError
+        ) as e:
             print(f"Error analyzing {match_url}: {e}")
             return None
+
+async def _run_matches_batch(*args, **kwargs) -> None:
+    session, header, matches, tname = args[0], args[1], args[2], args[3]
+    elo_data, semaphore, engine = args[4], args[5], args[6]
+    year = kwargs.get("year", 2023)
+    gender = kwargs.get("gender", "atp")
+    tasks = [
+        _analyze_single_match(
+            session, header, m_url, np.array([tname]),
+            elo_data, semaphore, engine, year, gender
+        )
+        for m_url in matches
+    ]
+    await asyncio.gather(*tasks)
 
 async def run_tournament_backtest(
     tournament_id: str,
@@ -107,37 +116,25 @@ async def run_tournament_backtest(
     engine = BacktestEngine(output_dir="backtest/results")
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    elo_data = await ELO_table(gender.upper())
+    elo_data = await elo_table(gender.upper())
 
     async with aiohttp.ClientSession(headers=header) as session:
         await login(session)
         print(f"=== Starting Backtest for: {tournament_name} ({year}) ===")
         matches = await crawler.fetch_tournament_matches(session, tournament_id)
         print(f"Found {len(matches)} matches in tournament.\n")
-
-        tasks = [
-            _analyze_single_match(
-                session, header, m_url, np.array([tournament_name]),
-                elo_data, semaphore, engine, year, gender
-            )
-            for m_url in matches
-        ]
-        await asyncio.gather(*tasks)
+        await _run_matches_batch(
+            session, header, matches, tournament_name,
+            elo_data, semaphore, engine, year=year, gender=gender
+        )
 
     summary = engine.evaluator.get_summary()
     report_file = f"{tournament_name.replace(' ', '_').lower()}_{year}_backtest.xlsx"
     saved_path = engine.export_summary(report_file)
-
-    print("\n" + "=" * 55)
-    print(f"BACKTEST SUMMARY: {tournament_name} ({year})")
-    print(f"Total Matches Analyzed: {len(engine.results)}")
-    print(f"Total Bets Placed:      {summary['total_bets']}")
-    print(f"Wins / Losses:          {summary['wins']} / {summary['losses']}")
-    print(f"Win Rate:               {summary['win_rate']}%")
-    print(f"Total P&L:              {summary['total_pnl']} units")
-    print(f"ROI:                    {summary['roi_percent']}%")
-    print(f"Report exported to:     {saved_path}")
-    print("=" * 55 + "\n")
+    print_backtest_summary(
+        summary, len(engine.results), saved_path,
+        title=f"BACKTEST SUMMARY: {tournament_name} ({year})"
+    )
 
     return summary
 
@@ -162,7 +159,7 @@ async def run_january_2023_backtest(max_concurrency: int = 3) -> Dict[str, Any]:
     engine = BacktestEngine(output_dir="backtest/results")
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    atp_elo, wta_elo = await asyncio.gather(ELO_table("ATP"), ELO_table("WTA"))
+    atp_elo, wta_elo = await asyncio.gather(elo_table("ATP"), elo_table("WTA"))
 
     async with aiohttp.ClientSession(headers=header) as session:
         await login(session)
@@ -176,30 +173,18 @@ async def run_january_2023_backtest(max_concurrency: int = 3) -> Dict[str, Any]:
             elo_data = atp_elo if gender == "atp" else wta_elo
             matches = await crawler.fetch_tournament_matches(session, tid)
             print(f"Matchs trouvés : {len(matches)}")
-
-            tasks = [
-                _analyze_single_match(
-                    session, header, m_url, np.array([tname]),
-                    elo_data, semaphore, engine, 2023, gender
-                )
-                for m_url in matches
-            ]
-            await asyncio.gather(*tasks)
+            await _run_matches_batch(
+                session, header, matches, tname,
+                elo_data, semaphore, engine, year=2023, gender=gender
+            )
 
     summary = engine.evaluator.get_summary()
     report_file = "january_2023_consolidated_backtest.xlsx"
     saved_path = engine.export_summary(report_file)
-
-    print("\n" + "=" * 60)
-    print("🏆 BILAN CONSOLIDÉ - JANVIER 2023 (ATP & WTA)")
-    print(f"Total Matchs Analysés : {len(engine.results)}")
-    print(f"Total Paris Confluence  : {summary['total_bets']}")
-    print(f"Gagnés / Perdus         : {summary['wins']} / {summary['losses']}")
-    print(f"Taux de Réussite        : {summary['win_rate']}%")
-    print(f"P&L Total               : {summary['total_pnl']} unités")
-    print(f"ROI                     : {summary['roi_percent']}%")
-    print(f"Rapport consolidé dans  : {saved_path}")
-    print("=" * 60 + "\n")
+    print_backtest_summary(
+        summary, len(engine.results), saved_path,
+        title="BILAN CONSOLIDÉ - JANVIER 2023 (ATP & WTA)"
+    )
 
     return summary
 

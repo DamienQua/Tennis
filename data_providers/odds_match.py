@@ -29,7 +29,7 @@ async def fetch_odds(session, player):
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.5)) as resp:
             if resp.status == 200:
                 return await resp.text()
-    except Exception:
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
         pass
     return ""
 
@@ -108,11 +108,11 @@ async def apply_odds_data(html1, html2, match_vs, indice_tab):
     if not success:
         await process_odds(html2, match_vs, indice_tab, 3)
     
-    oA = float(match_vs[36]) if match_vs[36] else 0.0
-    oB = float(match_vs[37]) if match_vs[37] else 0.0
-    if oA < oB:
+    odds_a = float(match_vs[36]) if match_vs[36] else 0.0
+    odds_b = float(match_vs[37]) if match_vs[37] else 0.0
+    if odds_a < odds_b:
         indice_tab[22], indice_tab[23] = 40, 0
-    elif oA > oB:
+    elif odds_a > odds_b:
         indice_tab[22], indice_tab[23] = 0, 40
     else:
         indice_tab[22], indice_tab[23] = 20, 20

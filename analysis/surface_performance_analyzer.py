@@ -12,6 +12,8 @@
         analyze(match_id, surface, flag): Calculates rank from surface win percentages.
 """
 
+import asyncio
+import aiohttp
 from bs4 import BeautifulSoup
 
 class SurfacePerformanceAnalyzer:
@@ -67,5 +69,8 @@ class SurfacePerformanceAnalyzer:
             if len(tds) <= target_idx:
                 return 10
             return self._calculate_surface_rank(tds, target_idx)
-        except Exception:
+        except (
+            aiohttp.ClientError, asyncio.TimeoutError,
+            IndexError, ValueError, AttributeError, KeyError
+        ):
             return 10

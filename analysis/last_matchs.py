@@ -25,15 +25,19 @@ from utils.helpers import DateHelper
 class TennisDataFetcher:
     _activity_pane_cache = {}
 
-    def __init__(self, session, admin_url):
+    def __init__(self, session, admin_url=None):
         self.session = session
         self.admin_url = admin_url
 
-    async def fetch_data(self, url, data=None):
+    async def fetch_data(self, url, data=None, method='POST'):
         max_retries = 2
         for attempt in range(max_retries):
             try:
-                async with self.session.post(url, data=data) as response:
+                if method.upper() == 'GET':
+                    req = self.session.get(url)
+                else:
+                    req = self.session.post(url, data=data)
+                async with req as response:
                     return await response.text()
             except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
                 if attempt < max_retries - 1:
@@ -64,12 +68,12 @@ class TennisDataFetcher:
             tour_name = self._extract_tournament_name(soup)
             if tour_name:
                 return tour_name
-        except Exception:
+        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, AttributeError):
             pass
         return default_tour or ""
 
     async def fetch_player_activity(self, player_id, match_id, activity_option, odds_option = "0"):
-        pAB_param = {
+        player_param = {
             "action": "playerActivity",
             "activityOffset": "0",
             "basic-activity-option": str(activity_option),
@@ -78,7 +82,7 @@ class TennisDataFetcher:
             "playerID": player_id,
             "matchID": match_id
         }
-        data_html = await self.fetch_data(self.admin_url, pAB_param)
+        data_html = await self.fetch_data(self.admin_url, player_param)
         return BeautifulSoup(data_html, "lxml")
 
     async def fetch_player_activities(self, player_id, match_id):
@@ -95,9 +99,9 @@ class TennisDataFetcher:
             player_id, match_id, activity_option, odds_option
         )
 
-    async def fetch_match_statistics(self, pAB_match):
+    async def fetch_match_statistics(self, match_element):
         try:
-            a_tags = pAB_match.find_all("a") if pAB_match else []
+            a_tags = match_element.find_all("a") if match_element else []
             valid_link = len(a_tags) >= 2 and a_tags[1].has_attr("data-action")
             if valid_link and a_tags[1].has_attr("data-matchid"):
                 action_data = {
@@ -106,7 +110,7 @@ class TennisDataFetcher:
                 }
                 stats_match_html = await self.fetch_data(self.admin_url, action_data)
                 return BeautifulSoup(stats_match_html, "lxml")
-        except Exception:
+        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, AttributeError, IndexError):
             pass
         return None
 
@@ -119,7 +123,7 @@ class TennisDataParser:
             target = parts[1] if len(parts) > 1 else parts[0]
             val = target.replace("N/A", "0").strip().split("%")[0].strip()
             return float(val) if val else 0.0
-        except Exception:
+        except (ValueError, IndexError, AttributeError):
             return 0.0
 
     @classmethod
@@ -152,7 +156,7 @@ class TennisDataParser:
             points_first_serve = _extract_pct(12)
             per_save_bp = _extract_pct(18)
             return min_tour, per_first_serve, points_first_serve, per_save_bp
-        except Exception:
+        except (IndexError, ValueError, AttributeError, TypeError):
             return 0, 0, 0, 0
 
 class StatisticsProcessor:
@@ -161,8 +165,8 @@ class StatisticsProcessor:
         return TennisDataParser.parse_win_percentages(data)
 
     @staticmethod
-    async def process_match_statistics(data_fetcher, pAB_matchs, tour_now, m_i):
-        stats_match = await data_fetcher.fetch_match_statistics(pAB_matchs[m_i])
+    async def process_match_statistics(data_fetcher, matches_list, tour_now, m_i):
+        stats_match = await data_fetcher.fetch_match_statistics(matches_list[m_i])
         return TennisDataParser.parse_match_statistics(stats_match)
 
 class TennisMatchAnalyzer:
@@ -182,7 +186,7 @@ class TennisMatchAnalyzer:
             rows = table.find_all("tr") if table else []
             tds = rows[2].find_all("td") if len(rows) > 2 else []
             return tds[1].text.strip().split() if len(tds) > 1 else None
-        except Exception:
+        except (AttributeError, IndexError):
             return None
 
     @staticmethod
@@ -205,10 +209,13 @@ class TennisMatchAnalyzer:
             odds_val = self._extract_odds_spread_value(odds_spread, is_fav)
             if odds_val is not None:
                 match_vs[42 + last_flag] = odds_val
-        except Exception:
+        except (
+            aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, IndexError
+        ):
             pass
 
-    async def analyze_match(self, today, match_vs, player_id, match_id, last_flag, favorite):
+    async def analyze_match(self, *args, **kwargs):
+        today, match_vs, player_id, match_id, last_flag, favorite = args[:6]
         default_tour = match_vs[0] if len(match_vs) > 0 and match_vs[0] else ""
         tour_now, (data_act1, data_surf) = await asyncio.gather(
             self.fetch_tournament_data(match_id, default_tour=default_tour),
@@ -220,7 +227,9 @@ class TennisMatchAnalyzer:
         )
         nb_match_last_month = self.calculate_matches_last_month(today, data_act1)
 
-        self.update_match_vs(match_vs, win_percentages, match_stats, nb_match_last_month, last_flag)
+        self.update_match_vs(
+            match_vs, win_percentages, match_stats, nb_match_last_month, last_flag
+        )
         await self._update_player_odds(match_vs, player_id, match_id, last_flag, favorite)
 
         return match_vs
@@ -250,7 +259,7 @@ class TennisMatchAnalyzer:
                 return 0
             show_class = activity_table.find_all(class_="show")
             return DateHelper.calculate_matches_last_month(show_class, today)
-        except Exception:
+        except (AttributeError, ValueError, TypeError, IndexError):
             return 0
 
     def update_match_vs(
@@ -261,8 +270,8 @@ class TennisMatchAnalyzer:
         ms = (list(match_stats) + [0.0] * 4)[:4]
         match_vs[offset:offset+11] = wp + [nb_match_last_month] + ms
 
-async def last_matchs(
-    session, today, match_vs, admin_url, player_id, match_id, last_flag, favorite
-):
+async def last_matchs(*args, **kwargs):
+    session, today, match_vs, admin_url = args[0], args[1], args[2], args[3]
+    player_id, match_id, last_flag, favorite = args[4], args[5], args[6], args[7]
     analyzer = TennisMatchAnalyzer(session, admin_url)
     return await analyzer.analyze_match(today, match_vs, player_id, match_id, last_flag, favorite)
