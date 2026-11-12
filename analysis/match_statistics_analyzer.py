@@ -46,7 +46,7 @@ class MatchStatisticsAnalyzer:
             100 - p_bp, p_bp, 100 - r_bp, r_bp
         ]
 
-    def calculate_tiebreak_stats(self, stats_match, _flag=None):
+    def calculate_tiebreak_stats(self, stats_match):
         """Calculates tiebreak win percentages from match scores."""
         header = stats_match.find_all(class_="col-xs-12")[0].find_all("h4")[0]
         scores = re.sub(r"\([^)]*\)", "", header.text.strip())

@@ -89,7 +89,7 @@ def _update_odds_indices(match_vs, indice_tab):
     else:
         indice_tab[20], indice_tab[21] = 10, 10
 
-async def process_odds(html, match_vs, indice_tab, _player_index=None):
+async def process_odds(html, match_vs, indice_tab):
     """Parses odds from HTML and updates match vector and indices."""
     name, odds1, odds2 = extract_data(html)
     if not (name and odds1 and odds2):

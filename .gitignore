@@ -8,4 +8,5 @@ Reviewed_Matchs.txt
 Matchs
 .env
 tests
+scratch
 analyze_complexity.py

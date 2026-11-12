@@ -155,7 +155,7 @@ class TacticsAnalyzer:
         match_id = self.extract_match_id(match_url)
         stats_match = await self.fetch_match_stats(match_id)
         serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
-        tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match, flag)
+        tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match)
         self.indice_tab[6:18] = serve_return_stats
         self.indice_tab[18:20] = tiebreak_stats
 

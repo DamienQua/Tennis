@@ -16,9 +16,10 @@ Notes:
     - Requires an internet connection to fetch the latest ratings
 """
 
+from typing import Dict
+
 import aiohttp
 from bs4 import BeautifulSoup
-from typing import Dict
 
 class EloFetcher:
     """Fetches and caches ELO ratings HTML content."""

@@ -22,7 +22,7 @@ from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator
 from backtest.backtest_engine import BacktestEngine, print_backtest_summary
 from core.analyze_match import analyze_match
-from data_providers.ELO_table import elo_table
+from data_providers.elo_table import elo_table
 
 os.environ.pop("SSLKEYLOGFILE", None)
 

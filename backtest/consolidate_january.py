@@ -17,7 +17,7 @@ from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator, BetRecord
 from backtest.backtest_engine import BacktestResult, BacktestEngine, print_backtest_summary
 from data_providers.elo_matcher import EloMatcher
-from data_providers.ELO_table import elo_table
+from data_providers.elo_table import elo_table
 
 def _extract_match_data(worksheet: Any) -> Optional[Dict[str, Any]]:
     player1 = worksheet.cell(1, 2).value

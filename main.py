@@ -29,7 +29,7 @@ import numpy as np
 from core.analyze_match import analyze_match
 from core.match_filter import MatchFilter
 from core.match_repository import MatchRepository
-from data_providers.ELO_table import elo_table
+from data_providers.elo_table import elo_table
 from utils.helpers import get_arg
 
 os.environ.pop('SSLKEYLOGFILE', None)

@@ -42,12 +42,13 @@ class TournamentCrawler:
 
         soup = BeautifulSoup(html, "lxml")
         results = []
-        for link_elem in soup.find_all("a", href=True):
-            if "/tournament/" in link_elem["href"]:
+        for link_elem in soup.find_all("a"):
+            href = link_elem.get("href", "")
+            if "/tournament/" in href:
                 name = link_elem.text.strip()
                 if self.is_major_tournament(name):
-                    tid = link_elem["href"].split("/tournament/")[1].split("/")[0]
-                    results.append({"id": tid, "name": name, "url": link_elem["href"]})
+                    tid = href.split("/tournament/")[1].split("/")[0]
+                    results.append({"id": tid, "name": name, "url": href})
         return results
 
     async def fetch_tournament_matches(
@@ -67,8 +68,8 @@ class TournamentCrawler:
         soup = BeautifulSoup(html, "lxml")
         seen = set()
         matches = []
-        for link_elem in soup.find_all("a", href=True):
-            href = link_elem["href"]
+        for link_elem in soup.find_all("a"):
+            href = link_elem.get("href", "")
             if "/match/" in href and href not in seen:
                 seen.add(href)
                 matches.append(href)

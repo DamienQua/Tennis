@@ -72,15 +72,17 @@ def _ids_from_soup(soup_abc):
     if not soup_abc:
         return []
     seen = []
-    for link_elem in soup_abc.find_all('a', href=re.compile(r'/player/\?playerid=\d+')):
-        match_obj = re.search(r'playerid=(\d+)', link_elem.get('href', ''))
-        valid_link = (
-            match_obj
-            and match_obj.group(1) not in seen
-            and 'General Comments' not in link_elem.text
-        )
-        if valid_link:
-            seen.append(match_obj.group(1))
+    for link_elem in soup_abc.find_all('a'):
+        href = link_elem.get('href', '')
+        if '/player/?playerid=' in href:
+            match_obj = re.search(r'playerid=(\d+)', href)
+            valid_link = (
+                match_obj
+                and match_obj.group(1) not in seen
+                and 'General Comments' not in link_elem.text
+            )
+            if valid_link:
+                seen.append(match_obj.group(1))
     return seen
 
 def _ids_from_regex(abc):
@@ -122,12 +124,14 @@ def _names_from_title(soup_abc):
 def _names_from_links(soup_abc):
     players = []
     seen_ids = set()
-    for link_elem in soup_abc.find_all('a', href=re.compile(r'/player/\?playerid=\d+')):
-        pid = link_elem.get('href', '').split('playerid=')[-1]
-        text = link_elem.text.strip()
-        if pid not in seen_ids and text and 'General Comments' not in text:
-            seen_ids.add(pid)
-            players.append(clean_player_name(text))
+    for link_elem in soup_abc.find_all('a'):
+        href = link_elem.get('href', '')
+        if '/player/?playerid=' in href:
+            pid = href.split('playerid=')[-1]
+            text = link_elem.text.strip()
+            if pid not in seen_ids and text and 'General Comments' not in text:
+                seen_ids.add(pid)
+                players.append(clean_player_name(text))
     return (players[0], players[1]) if len(players) >= 2 else None
 
 def _names_from_overview(data_text):

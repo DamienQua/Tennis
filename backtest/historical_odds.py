@@ -59,13 +59,13 @@ class HistoricalOddsProvider:
             winner_name = str(row["Winner"])
             loser_name = str(row["Loser"])
             if (
-                self._name_matches(player_a, winner_name)
-                and self._name_matches(player_b, loser_name)
+                    self._name_matches(player_a, winner_name)
+                    and self._name_matches(player_b, loser_name)
             ):
                 return row, True
             if (
-                self._name_matches(player_b, winner_name)
-                and self._name_matches(player_a, loser_name)
+                    self._name_matches(player_b, winner_name)
+                    and self._name_matches(player_a, loser_name)
             ):
                 return row, False
         return None
