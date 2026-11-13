@@ -18,7 +18,7 @@ CREATE TABLE bets (
                     winner TEXT DEFAULT '',
                     profit_units REAL DEFAULT 0.0
                 , closing_odds REAL DEFAULT 0.0, clv_percent REAL DEFAULT 0.0);
-INSERT INTO "bets" VALUES(1,'https://tennisinsight.com/match/260564112/2026-indian-wells-wta-champs/rr/aryna-sabalenka-vs-elina-svitolina','13/11/2026 11:41','Indian Wells WTA Champs','Hard','Aryna Sabalenka','Elina Svitolina','Aryna Sabalenka',1.51,1.23,7.33766233766233733e-01,10.8,1.706000000000001364e+02,3.0,'En attente','',0.0,0.0,0.0);
+INSERT INTO "bets" VALUES(1,'https://tennisinsight.com/match/260564112/2026-indian-wells-wta-champs/rr/aryna-sabalenka-vs-elina-svitolina','13/11/2026 11:41','Indian Wells WTA Champs','Hard','Aryna Sabalenka','Elina Svitolina','Aryna Sabalenka',1.51,1.23,7.33766233766233733e-01,10.8,1.70600000000000136e+02,3.0,'En attente','',0.0,1.48,2.03);
 CREATE TABLE matches (
                     match_url TEXT PRIMARY KEY,
                     analyzed_at TEXT NOT NULL,
