@@ -1,25 +1,28 @@
-"""
-Module for matching and extracting player Elo ratings from Tennis Abstract reports.
-"""
+"""Extraction et appariement des classements ELO par surface."""
 
 from itertools import takewhile
+from typing import List, Tuple
 import jaro
+from core.player_extractor import PlayerExtractor
+
 
 class EloMatcher:
-    """Matches player names and extracts surface-specific Elo ratings."""
-
-    PLAYER_ALIASES = {
-        "Cori Gauff": "Coco Gauff",
-        "Coco Gauff": "Cori Gauff"
-    }
+    """Recherche les notes ELO des joueurs dans les tables Tennis Abstract."""
 
     @classmethod
-    def get_player_elo(cls, player_line, match_player_name, surface):
-        """Looks up surface Elo rating for player name from Elo table string."""
+    def get_player_elo(cls, player_line: str, match_player_name: str, surface: str) -> str:
+        """Vérifie la correspondance du nom et extrait l'ELO de la surface."""
         words = player_line.split(" ")
         is_num = lambda x: x.isdigit() or x.replace(".", "", 1).isdigit()
         player_vs = " ".join(takewhile(lambda x: not is_num(x), words))
-        alias_name = cls.PLAYER_ALIASES.get(match_player_name, match_player_name)
+        if not player_vs:
+            return ""
+
+        # Vérification stricte sur le nom de famille pour éviter les homonymes
+        if player_vs.split()[-1].lower() != match_player_name.split()[-1].lower():
+            return ""
+
+        alias_name = PlayerExtractor.PLAYER_ALIASES.get(match_player_name, match_player_name)
         sim_orig = jaro.jaro_winkler_metric(match_player_name, player_vs)
         sim_alias = jaro.jaro_winkler_metric(alias_name, player_vs)
         if sim_orig >= 0.95 or sim_alias >= 0.95:
@@ -27,7 +30,9 @@ class EloMatcher:
         return ""
 
     @classmethod
-    def _find_rating_for_player(cls, lines, player_name, surface):
+    def _find_rating_for_player(
+        cls, lines: List[str], player_name: str, surface: str
+    ) -> str:
         for line in lines:
             rating = cls.get_player_elo(line, player_name, surface)
             if rating:
@@ -35,25 +40,25 @@ class EloMatcher:
         return ""
 
     @classmethod
-    def find_elo_ratings(cls, elo_data, player_a_name, player_b_name, surface):
-        """Finds Elo ratings for both players on specified surface."""
+    def find_elo_ratings(
+        cls, elo_data: str, player_a_name: str, player_b_name: str, surface: str
+    ) -> Tuple[str, str]:
+        """Retourne le couple (elo_a, elo_b) pour la surface demandée."""
         lines = elo_data.split("\n")
         elo_a = cls._find_rating_for_player(lines, player_a_name, surface)
         elo_b = cls._find_rating_for_player(lines, player_b_name, surface)
         return elo_a, elo_b
 
     @staticmethod
-    def extract_elo_rating(player_line, player_name, surface):
-        """Extracts numeric Elo rating from table row for specified surface."""
+    def extract_elo_rating(player_line: str, player_name: str, surface: str) -> str:
+        """Extrait la valeur numérique ELO correspondant à la surface."""
         tokens = player_line.replace("-", " ").split()
         if not tokens:
             return ""
         if "Hard" not in surface and surface != "Clay":
             return tokens[-2] if len(tokens) >= 2 else ""
-
         offset = 1 if "Hard" in surface else 2
         base_idx = player_name.replace("-", " ").count(" ") + offset
-
         for idx in range(base_idx, len(tokens)):
             candidate = tokens[idx]
             if candidate.replace(".", "", 1).isdigit():

@@ -1,42 +1,25 @@
-"""
-Asynchronously fetch and process betting odds for two players from Odds Portal.
-
-This module provides functions to:
-- Fetch odds data for a player from Odds Portal website
-- Extract player name and odds from HTML content
-- Process and compare odds between two players
-- Update match and indices data based on retrieved odds
-
-The main function `odds_match` retrieves odds for two players, compares their odds,
-and updates match statistics accordingly.
-
-Functions:
-- fetch_odds: Retrieves HTML content for a player from Odds Portal
-- extract_data: Parses HTML to extract player name and odds
-- process_odds: Processes odds and updates match data
-- odds_match: Orchestrates odds retrieval and processing for a match
-"""
+"""Récupération asynchrone des cotes bookmakers depuis OddsPortal."""
 
 import asyncio
-import os
 import re
-
+from typing import Optional, Tuple
 import aiohttp
+from core.models import MatchAnalysisData
 
-os.environ.pop('SSLKEYLOGFILE', None)
 
-async def fetch_odds(session, player):
-    """Fetches bookmaker odds page for given player name."""
+async def fetch_odds(session: aiohttp.ClientSession, player: str) -> str:
+    """Télécharge la page de recherche OddsPortal pour un joueur."""
     url = f"https://www.oddsportal.com/search/{player}"
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.5)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
             if resp.status == 200:
                 return await resp.text()
     except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
         pass
     return ""
 
-def _extract_match_name(text):
+
+def _extract_match_name(text: str) -> Optional[str]:
     pattern_home = r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")'
     pattern_away = r'(?:&quot;|\\")away-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")'
     home = re.search(pattern_home, text)
@@ -55,7 +38,8 @@ def _extract_match_name(text):
     html_players = re.findall(r'<p class="order-[12][^"]*">([^<]+)</p>', text)
     return f"{html_players[0]} - {html_players[1]}" if len(html_players) >= 2 else None
 
-def _extract_odds_values(text):
+
+def _extract_odds_values(text: str) -> Tuple[Optional[str], Optional[str]]:
     odds = re.findall(r'(?:&quot;|\\")maxOdds(?:&quot;|\\"):([\d.]+)', text)
     if not odds:
         odds = re.findall(r'class="font-primary font-bold">([\d.]+)</p>', text)
@@ -63,80 +47,101 @@ def _extract_odds_values(text):
         odds = re.findall(r'(?:&quot;|\\")avgOdds(?:&quot;|\\"):([\d.]+)', text)
     return (odds[0], odds[1]) if len(odds) >= 2 else (None, None)
 
-def extract_data(text):
-    """Extracts player name and closing match odds from HTML."""
+
+def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Extrait l'intitulé du match et les deux cotes."""
     name = _extract_match_name(text)
     odds1, odds2 = _extract_odds_values(text)
     return name, odds1, odds2
 
-def _assign_player_odds(name, odds, match_vs):
-    player1_last = match_vs[2].split(" ")[-1].lower()
-    player2_last = match_vs[3].split(" ")[-1].lower()
-    p1_pos = name.lower().find(player1_last)
-    p2_pos = name.lower().find(player2_last)
 
-    if p1_pos != -1 and (p2_pos == -1 or p1_pos < p2_pos):
-        match_vs[38], match_vs[39] = odds[0], odds[1]
+def _assign_player_odds(
+    match_title: str, odds: Tuple[float, float], match: MatchAnalysisData
+) -> bool:
+    """Vérifie que les DEUX joueurs sont présents dans le titre avant assignation."""
+    title_low = match_title.lower()
+    p1_last = match.player_a.name.split()[-1].lower()
+    p2_last = match.player_b.name.split()[-1].lower()
+
+    p1_pos = title_low.find(p1_last)
+    p2_pos = title_low.find(p2_last)
+    if p1_pos == -1 or p2_pos == -1:
+        return False
+
+    if p1_pos < p2_pos:
+        match.player_a.book_odds, match.player_b.book_odds = odds[0], odds[1]
     else:
-        match_vs[38], match_vs[39] = odds[1], odds[0]
+        match.player_a.book_odds, match.player_b.book_odds = odds[1], odds[0]
+    return True
 
-def _update_odds_indices(match_vs, indice_tab):
-    odds_1, odds_2 = float(match_vs[38]), float(match_vs[39])
+
+def _update_odds_indices(match: MatchAnalysisData) -> None:
+    odds_1, odds_2 = match.player_a.book_odds, match.player_b.book_odds
     if odds_1 < odds_2:
-        indice_tab[20], indice_tab[21] = 20, 0
+        match.confidence.book_fav_bonus = (20.0, 0.0)
     elif odds_1 > odds_2:
-        indice_tab[20], indice_tab[21] = 0, 20
+        match.confidence.book_fav_bonus = (0.0, 20.0)
     else:
-        indice_tab[20], indice_tab[21] = 10, 10
+        match.confidence.book_fav_bonus = (10.0, 10.0)
 
-async def process_odds(html, match_vs, indice_tab):
-    """Parses odds from HTML and updates match vector and indices."""
+
+def process_odds(html: str, match: MatchAnalysisData) -> bool:
+    """Parse et applique les cotes bookmakers au match si valides."""
     name, odds1, odds2 = extract_data(html)
     if not (name and odds1 and odds2):
         return False
-
-    odds = [float(odds1), float(odds2)]
-    _assign_player_odds(name, odds, match_vs)
-    _update_odds_indices(match_vs, indice_tab)
+    if not _assign_player_odds(name, (float(odds1), float(odds2)), match):
+        return False
+    _update_odds_indices(match)
     return True
 
-async def fetch_both_odds(session, player1_name, player2_name):
-    """Fetches odds concurrently for two competing players."""
-    surname_1 = player1_name.split(" ")[-1] if player1_name else ""
-    surname_2 = player2_name.split(" ")[-1] if player2_name else ""
-    return await asyncio.gather(
+
+async def fetch_both_odds(
+    session: aiohttp.ClientSession, player1_name: str, player2_name: str
+) -> Tuple[str, str]:
+    """Récupère les pages de cotes des deux joueurs en parallèle."""
+    surname_1 = player1_name.split()[-1] if player1_name else ""
+    surname_2 = player2_name.split()[-1] if player2_name else ""
+    res1, res2 = await asyncio.gather(
         fetch_odds(session, surname_1),
-        fetch_odds(session, surname_2)
+        fetch_odds(session, surname_2),
     )
+    return res1, res2
 
-async def apply_odds_data(html1, html2, match_vs, indice_tab):
-    """Applies closing odds from either player HTML page to match data."""
-    success = await process_odds(html1, match_vs, indice_tab)
-    if not success:
-        await process_odds(html2, match_vs, indice_tab)
 
-    odds_a = float(match_vs[36]) if match_vs[36] else 0.0
-    odds_b = float(match_vs[37]) if match_vs[37] else 0.0
+def apply_odds_data(html1: str, html2: str, match: MatchAnalysisData) -> MatchAnalysisData:
+    """Applique les cotes bookmakers et met à jour le bonus favori modèle."""
+    if not process_odds(html1, match):
+        process_odds(html2, match)
+
+    odds_a, odds_b = match.player_a.model_odds, match.player_b.model_odds
     if odds_a < odds_b:
-        indice_tab[22], indice_tab[23] = 40, 0
+        match.confidence.model_fav_bonus = (40.0, 0.0)
     elif odds_a > odds_b:
-        indice_tab[22], indice_tab[23] = 0, 40
+        match.confidence.model_fav_bonus = (0.0, 40.0)
     else:
-        indice_tab[22], indice_tab[23] = 20, 20
+        match.confidence.model_fav_bonus = (20.0, 20.0)
+    return match
 
-    return match_vs, indice_tab
 
-async def _odds_match_impl(session, match_vs, indice_tab, odds_future=None):
+async def odds_match(
+    match: MatchAnalysisData,
+    session: Optional[aiohttp.ClientSession] = None,
+    odds_future: Optional[asyncio.Future] = None,
+) -> MatchAnalysisData:
+    """Orchestre la récupération et l'application des cotes bookmakers."""
     if odds_future is not None:
         html1, html2 = await odds_future
-    else:
-        html1, html2 = await fetch_both_odds(session, match_vs[2], match_vs[3])
+        return apply_odds_data(html1, html2, match)
 
-    return await apply_odds_data(html1, html2, match_vs, indice_tab)
-
-async def odds_match(match_vs, indice_tab, session=None, odds_future=None):
-    """Coordinates odds retrieval and updates confidence indices."""
     if session is not None:
-        return await _odds_match_impl(session, match_vs, indice_tab, odds_future=odds_future)
+        html1, html2 = await fetch_both_odds(
+            session, match.player_a.name, match.player_b.name
+        )
+        return apply_odds_data(html1, html2, match)
+
     async with aiohttp.ClientSession() as new_session:
-        return await _odds_match_impl(new_session, match_vs, indice_tab, odds_future=odds_future)
+        html1, html2 = await fetch_both_odds(
+            new_session, match.player_a.name, match.player_b.name
+        )
+        return apply_odds_data(html1, html2, match)

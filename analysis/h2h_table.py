@@ -1,55 +1,46 @@
-"""
-Processes head-to-head (H2H) tennis match data and calculates statistical insights.
+"""Extraction et analyse du tableau Head-to-Head (H2H)."""
 
-This module provides functionality to extract and analyze historical match data between two players,
-including win percentages, surface performance, and other relevant statistics.
-
-Key components:
-- MatchContext: Stores contextual information about a specific match
-- H2HDataProcessor: Processes and calculates head-to-head match statistics
-- h2h_table: Async function to generate H2H match insights and update confidence indices
-
-The class handles parsing match details, calculating win percentages across different categories
-(all-time, last year, surface-specific, and game-related), and supporting confidence index
-generation.
-"""
-
+from dataclasses import dataclass
 import re
-from analysis.indice_confiance import indice_confiance
+from typing import Tuple
+import aiohttp
+from bs4 import BeautifulSoup
 from analysis.h2h_stats import H2HStats, DateUtils
+from analysis.indice_confiance import indice_confiance
+from core.models import H2HMetrics, MatchAnalysisData
 
+
+@dataclass
 class MatchContext:
-    """Carries contextual HTTP and match metadata for head-to-head processing."""
+    """Contexte réseau et match pour le traitement H2H."""
 
-    def __init__(self, surface, admin_url, header, match_id):
-        self.surface = surface
-        self.admin_url = admin_url
-        self.header = header
-        self.match_id = match_id
+    surface: str
+    admin_url: str
+    header: dict
+    match_id: str
+
 
 class H2HDataProcessor:
-    """Parses raw HTML head-to-head match rows and updates match stats accordingly."""
+    """Parse les lignes HTML H2H et calcule H2HMetrics."""
 
-    def __init__(self, data, match_vs):
+    def __init__(self, data: BeautifulSoup, match: MatchAnalysisData) -> None:
         self.data = data
-        self.match_vs = match_vs
-        self.stats = H2HStats(match_vs[2], match_vs[3])
-        self.go = ""
+        self.match = match
+        self.stats = H2HStats(match.player_a.name, match.player_b.name)
+        self.go_url = ""
         self.flag = 0
 
-    def process_h2h_data(self):
-        """Processes total matches, individual encounters, and win percentages."""
+    def process(self) -> None:
+        """Exécute le comptage et le parsing des confrontations passées."""
         self._process_h2h_count()
         self._process_h2h_matches()
-        self._calculate_percentages()
+        self.match.h2h = self.stats.to_metrics()
 
-    def _process_h2h_count(self):
+    def _process_h2h_count(self) -> None:
         if not self.data or not getattr(self.data, "text", None) or "series " not in self.data.text:
-            self.match_vs[6:14] = [0] * 8
+            self.match.h2h = H2HMetrics()
             return
-
         ind = 1 if "tied" in self.data.text else 0
-
         for idx in range(2):
             try:
                 split_series = self.data.text.strip().split("series ")[1]
@@ -57,82 +48,80 @@ class H2HDataProcessor:
                 self.stats.h2h_nb += int(val)
             except (IndexError, ValueError):
                 pass
-
         if self.stats.h2h_nb == 0:
-            self.match_vs[6:14] = [0] * 8
+            self.match.h2h = H2HMetrics()
 
     @staticmethod
-    def _parse_row_score(lines):
-        try:
-            raw_score = lines[9].strip() if len(lines) > 9 else ""
-            clean_score = re.sub(r"[\(\[].*?[\)\]]", "", raw_score)
-            res = clean_score.replace("ret.", " ").replace("w/o", "").strip()
-            return res if res else "0-0 0-0"
-        except (IndexError, AttributeError):
-            return "0-0 0-0"
+    def _parse_row_score(raw_score: str) -> str:
+        clean_score = re.sub(r"[\(\[].*?[\)\]]", "", raw_score)
+        res = clean_score.replace("ret.", " ").replace("w/o", "").strip()
+        return res if res else "0-0 0-0"
 
-    @staticmethod
-    def _extract_match_details(row_elem):
-        """Extract details from a match row."""
-        try:
-            tab_parts = row_elem.text.strip().split("\t")
-            date_ms = DateUtils.parse_date(tab_parts[0].strip()) if tab_parts else 0
-        except (ValueError, IndexError, AttributeError):
-            date_ms = 0
+    @classmethod
+    def _extract_match_details(cls, row_elem) -> Tuple[float, str, str, str]:
+        """Extrait date, surface, vainqueur et score depuis une ligne <tr>."""
+        tds = row_elem.find_all("td")
+        if len(tds) >= 5:
+            date_ms = DateUtils.parse_date(tds[0].text.strip())
+            surface_m = tds[2].text.split(",")[0].strip()
+            raw_winner = tds[3].text.strip()
+            winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
+            score = cls._parse_row_score(tds[4].text.strip())
+            return date_ms, surface_m, winner, score
 
+        # Repli texte brut si la structure des colonnes diffère
         lines = [line.strip() for line in row_elem.text.strip().split("\n") if line.strip()]
+        tab_parts = row_elem.text.strip().split("\t")
+        date_ms = DateUtils.parse_date(tab_parts[0].strip()) if tab_parts else 0.0
         surface_m = lines[5].split(",")[0].strip() if len(lines) > 5 else ""
         raw_winner = lines[7].strip() if len(lines) > 7 else ""
         winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
-        score = H2HDataProcessor._parse_row_score(lines)
-        return date_ms, surface_m, winner, score
+        raw_score = lines[9].strip() if len(lines) > 9 else ""
+        return date_ms, surface_m, winner, cls._parse_row_score(raw_score)
 
-    def _update_go_flag(self, row_elem, surface_m, winner):
-        """Update the 'go' and 'flag' attributes if conditions are met."""
-        if self.go == "" and surface_m and surface_m in row_elem.text:
+    def _update_go_flag(self, row_elem, surface_m: str, winner: str) -> None:
+        if self.go_url == "" and surface_m and surface_m in row_elem.text:
             links = row_elem.find_all("a")
             if links:
-                self.go = links[-1].get("href", "")
-                self.flag = 0 if winner == self.match_vs[2] else 1
+                self.go_url = links[-1].get("href", "")
+                self.flag = 0 if winner == self.match.player_a.name else 1
 
-    def _process_h2h_matches(self):
-        """Process head-to-head matches."""
+    def _process_h2h_matches(self) -> None:
         h2h_elem = self.data.find(class_="h2h-matches") if self.data else None
         if not h2h_elem:
             return
-        h2h_tr = h2h_elem.find_all("tr")[1:]
-        surface = self.match_vs[1]
-        for row_elem in h2h_tr:
+        for row_elem in h2h_elem.find_all("tr")[1:]:
             date_ms, surface_m, winner, score = self._extract_match_details(row_elem)
-            self.stats.update_stats(winner, date_ms, surface_m, score, surface)
+            self.stats.update_stats(winner, date_ms, surface_m, score, self.match.surface)
             self._update_go_flag(row_elem, surface_m, winner)
 
-    def _calculate_percentages(self):
-        percentages = self.stats.calculate_percentages()
-        self.match_vs[6:14] = (
-            percentages["all_time"] + percentages["last_year"] +
-            percentages["surface"] + percentages["games"]
-        )
 
-async def h2h_table(data, match_vs, session, match_context: MatchContext, indice_tab=None):
-    """Extracts H2H records from HTML and updates confidence index array."""
-    if indice_tab is None:
-        from utils.variables import indice_tab as default_tab
-        indice_tab = default_tab
+async def h2h_table(
+    data: BeautifulSoup,
+    match: MatchAnalysisData,
+    session: aiohttp.ClientSession,
+    match_context: MatchContext,
+) -> MatchAnalysisData:
+    """Analyse les confrontations H2H et met à jour les métriques de confiance."""
+    processor = H2HDataProcessor(data, match)
+    processor.process()
 
-    processor = H2HDataProcessor(data, match_vs)
-    processor.process_h2h_data()
-
+    conf = match.confidence
     if processor.stats.win_a_sur > 0:
-        indice_tab[4] = 2*indice_tab[1]
+        conf.h2h_surface_bonus_a = 2 * conf.surface_rank_a
     if processor.stats.win_b_sur > 0:
-        indice_tab[5] = 2*indice_tab[3]
+        conf.h2h_surface_bonus_b = 2 * conf.surface_rank_b
 
-    if processor.go != "":
+    if processor.go_url:
         await indice_confiance(
-            session, match_context.admin_url, "", match_context.match_id,
-            match_context.surface, processor.flag, "Tactique", processor.go,
-            indice_tab=indice_tab
+            session=session,
+            admin_url=match_context.admin_url,
+            player_id="",
+            match_id=match_context.match_id,
+            surface=match_context.surface,
+            flag=processor.flag,
+            choix="Tactique",
+            match_url=processor.go_url,
+            confidence=conf,
         )
-
-    return match_vs
+    return match

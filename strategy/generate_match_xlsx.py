@@ -1,195 +1,136 @@
-"""
-Generate an Excel file with detailed tennis match analysis.
+"""Génération de la fiche Excel détaillée pour un match analysé."""
 
-This function creates an Excel workbook with comprehensive statistics comparing two tennis players.
-The generated file includes performance metrics such as world ranking, win percentages,
-service statistics, estimated match odds, bookmaker odds, Elo ratings,
-and the Alpha 5+ All-Court betting strategy recommendations.
-
-Args:
-    match_vs (list): A list containing match and player statistics.
-
-Generates an Excel file in a structured directory with the match details and saves it
-to the 'Matchs/[Year]/[Month]/[Tournament]' directory.
-
-Example:
-    await generate_match_xlsx(match_data)
-"""
-
+from datetime import datetime
 import os
 import openpyxl
-from openpyxl.styles import Border, Side, PatternFill, Font
+from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from datetime import datetime
+from core.models import MatchAnalysisData
 from strategy.alpha_strategy import evaluate_alpha_strategy
 
-async def generate_match_xlsx(match_vs):
-    """Generate Excel file for tennis match analysis."""
-    date = datetime.now().strftime("%d/%m/%Y")
-    tournament = match_vs[0]
-    player1, player2 = match_vs[2], match_vs[3]
 
+def generate_match_xlsx(match: MatchAnalysisData) -> str:
+    """Génère le classeur Excel individuel du match et retourne son chemin."""
+    now = datetime.now()
+    date_str = now.strftime("%d/%m/%Y")
     workbook = openpyxl.Workbook()
     sheet = workbook.active
 
-    xlsx_data = _prepare_match_data(match_vs, player1, player2)
-    _populate_sheet_with_data(sheet, xlsx_data)
+    xlsx_data = _prepare_match_data(match)
+    for row in xlsx_data:
+        sheet.append(row)
+
     _adjust_column_widths(sheet)
     _apply_cell_borders(sheet)
     _apply_strategy_styling(sheet)
 
-    file_path = _save_workbook(workbook, date, tournament, player1, player2)
-    print(f"Excel file '{file_path}' has been generated.")
-
-def _safe_get(match_vs, index):
-    return match_vs[index] if len(match_vs) > index else ""
-
-def _prepare_match_data(match_vs, player1, player2):
-    """Prepare the data structure for the Excel sheet."""
-    model_1, model_2 = _safe_get(match_vs, 36), _safe_get(match_vs, 37)
-    book_1, book_2 = _safe_get(match_vs, 38), _safe_get(match_vs, 39)
-    elo_1, elo_2 = _safe_get(match_vs, 40), _safe_get(match_vs, 41)
-
-    alpha = evaluate_alpha_strategy(
-        model_1, model_2, book_1, book_2, elo_1, elo_2, player1, player2
+    file_path = _save_workbook(
+        workbook, now, date_str, match.tournament, match.player_a.name, match.player_b.name
     )
+    print(f"Excel file '{file_path}' has been generated.")
+    return file_path
+
+
+def _calculate_win_percentage(odds_value: float) -> float:
+    return round(90.0 / odds_value, 2) if odds_value > 0 else 0.0
+
+
+def _prepare_match_data(match: MatchAnalysisData) -> list:
+    pa, pb, h2h = match.player_a, match.player_b, match.h2h
+    alpha = evaluate_alpha_strategy(match)
 
     return [
-        ["", player1, player2],
-        ["Classement mondial", match_vs[4], match_vs[5]],
-        ["% Victoires carrière", match_vs[17], match_vs[28]],
-        ["% Victoires surface", match_vs[19], match_vs[30]],
+        ["", pa.name, pb.name],
+        ["Classement mondial", pa.ranking, pb.ranking],
+        ["% Victoires carrière", pa.win_pct_career, pb.win_pct_career],
+        ["% Victoires surface", pa.win_pct_career_surface, pb.win_pct_career_surface],
         ["", "", ""],
-        ["Ratio V/D carrière", match_vs[6], match_vs[7]],
-        ["Ratio V/D 1 an", match_vs[8], match_vs[9]],
-        ["Ratio V/D surface", match_vs[10], match_vs[11]],
-        ["% Sets gagnés", match_vs[12], match_vs[13]],
+        ["Ratio V/D carrière", h2h.all_time[0], h2h.all_time[1]],
+        ["Ratio V/D 1 an", h2h.last_year[0], h2h.last_year[1]],
+        ["Ratio V/D surface", h2h.surface[0], h2h.surface[1]],
+        ["% Sets gagnés", h2h.games[0], h2h.games[1]],
         ["", "", ""],
-        ["% Victoires 1 an", match_vs[16], match_vs[27]],
-        ["% Victoires 1 an surface", match_vs[18], match_vs[29]],
-        ["% Victoires 50 derniers matchs", match_vs[15], match_vs[26]],
-        ["% Victoires 10 derniers matchs", match_vs[14], match_vs[25]],
-        ["Nombre matchs joués dernier mois", match_vs[20], match_vs[31]],
-        ["Durée cumulée des derniers matchs tournoi en cours", match_vs[21], match_vs[32]],
+        ["% Victoires 1 an", pa.win_pct_1y, pb.win_pct_1y],
+        ["% Victoires 1 an surface", pa.win_pct_1y_surface, pb.win_pct_1y_surface],
+        ["% Victoires 50 derniers matchs", pa.win_pct_last_50, pb.win_pct_last_50],
+        ["% Victoires 10 derniers matchs", pa.win_pct_last_10, pb.win_pct_last_10],
+        ["Nombre matchs joués dernier mois", pa.matches_last_month, pb.matches_last_month],
+        ["Durée cumulée des derniers matchs tournoi en cours", pa.tournament_minutes, pb.tournament_minutes],
         ["", "", ""],
-        ["% 1er service", match_vs[22], match_vs[33]],
-        ["% points gagnés service", match_vs[23], match_vs[34]],
-        ["% balles de break sauvées", match_vs[24], match_vs[35]],
+        ["% 1er service", pa.first_serve_pct, pb.first_serve_pct],
+        ["% points gagnés service", pa.first_serve_pts_won, pb.first_serve_pts_won],
+        ["% balles de break sauvées", pa.break_points_saved_pct, pb.break_points_saved_pct],
         ["", "", ""],
         [
             "Pourcentage victoire",
-            _calculate_win_percentage(model_1),
-            _calculate_win_percentage(model_2)
+            _calculate_win_percentage(pa.model_odds),
+            _calculate_win_percentage(pb.model_odds),
         ],
         ["", "", ""],
-        ["Côte estimée", model_1, model_2],
-        ["Cote Bookmaker", book_1, book_2],
-        ["Classement ELO", elo_1, elo_2],
+        ["Côte estimée", pa.model_odds or "", pb.model_odds or ""],
+        ["Cote Bookmaker", pa.book_odds or "", pb.book_odds or ""],
+        ["Classement ELO", pa.elo or "", pb.elo or ""],
         ["", "", ""],
         ["STRATÉGIE ALPHA 5+", alpha["signal_j1"], alpha["signal_j2"]],
         ["Espérance de gain (EV)", alpha["ev_j1_str"], alpha["ev_j2_str"]],
         ["Écart ELO (ΔELO)", alpha["elo_diff_j1_str"], alpha["elo_diff_j2_str"]],
     ]
 
-def _calculate_win_percentage(odds_value):
-    """Calculate win percentage from odds."""
-    try:
-        val = float(odds_value)
-        return round(90 / val, 2) if val > 0 else 0.0
-    except (ValueError, TypeError):
-        return 0.0
 
-def _populate_sheet_with_data(sheet, xlsx_data):
-    """Add data rows to the Excel sheet."""
-    for row in xlsx_data:
-        sheet.append(row)
-
-def _adjust_column_widths(sheet):
-    """Auto-adjust column widths based on content."""
+def _adjust_column_widths(sheet) -> None:
     for column in sheet.columns:
-        max_length = _get_max_column_length(column)
-        column_letter = get_column_letter(column[0].column)
-        adjusted_width = max_length + 2
-        sheet.column_dimensions[column_letter].width = adjusted_width
+        max_len = max((len(str(cell.value or "")) for cell in column), default=0)
+        col_letter = get_column_letter(column[0].column)
+        sheet.column_dimensions[col_letter].width = max_len + 2
 
-def _get_max_column_length(column):
-    """Get the maximum character length in a column."""
-    max_length = 0
-    for cell in column:
-        try:
-            cell_length = len(str(cell.value))
-            if cell_length > max_length:
-                max_length = cell_length
-        except (TypeError, AttributeError):
-            pass
-    return max_length
 
-def _apply_cell_borders(sheet):
-    """Apply thin borders to all cells in the sheet."""
-    thin_border = _create_thin_border()
-
+def _apply_cell_borders(sheet) -> None:
+    thin = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
     for row in sheet.iter_rows(
-            min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):
         for cell in row:
-            cell.border = thin_border
+            cell.border = thin
 
-def _color_signal_cells(cells, fill, font):
-    for cell in cells:
-        if cell.value == "PARI CONSEILLÉ":
-            cell.fill = fill
-            cell.font = font
 
-def _apply_strategy_styling(sheet):
-    """Highlight Alpha 5+ recommended bet cells."""
+def _apply_strategy_styling(sheet) -> None:
     green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     green_font = Font(color="006100", bold=True)
     bold_font = Font(bold=True)
-
     for row in sheet.iter_rows(
-            min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
+        min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):
         header = str(row[0].value or "")
         if "STRATÉGIE ALPHA 5+" in header:
             row[0].font = bold_font
-            _color_signal_cells(row[1:], green_fill, green_font)
+            for cell in row[1:]:
+                if cell.value == "PARI CONSEILLÉ":
+                    cell.fill = green_fill
+                    cell.font = green_font
 
-def _create_thin_border():
-    """Create a thin border style for cells."""
-    return Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
 
-def _save_workbook(workbook, date, tournament, player1, player2):
-    """Save the workbook to the appropriate directory structure."""
-    folder_path = _create_match_folder(tournament)
-    filename = _generate_filename(date, player1, player2)
-    full_path = os.path.join(folder_path, filename)
-
-    workbook.save(full_path)
-    return full_path
-
-def _extract_year_from_tournament(tournament: str) -> int:
+def _extract_year_from_tournament(tournament: str, default_year: int) -> int:
     for word in tournament.split():
         if word.isdigit() and len(word) == 4 and word.startswith("20"):
             return int(word)
-    return datetime.now().year
+    return default_year
 
-def _create_match_folder(tournament):
-    """Create the directory structure for match files."""
-    year = _extract_year_from_tournament(tournament)
-    month = "January" if year < datetime.now().year else datetime.now().strftime("%B")
 
-    folder_path = os.path.join("Matchs", str(year), month, tournament.replace(' ', '_'))
+def _save_workbook(
+    workbook, now: datetime, date_str: str, tournament: str, player1: str, player2: str
+) -> str:
+    year = _extract_year_from_tournament(tournament, now.year)
+    month = now.strftime("%B")
+    folder_path = os.path.join("Matchs", str(year), month, tournament.replace(" ", "_"))
     os.makedirs(folder_path, exist_ok=True)
-    return folder_path
 
-def _generate_filename(date, player1, player2):
-    """Generate the Excel filename based on date and player names."""
-    safe_date = date.replace('/', '-')
-    safe_player1 = player1.replace(' ', '_')
-    safe_player2 = player2.replace(' ', '_')
-    return f"{safe_date}_{safe_player1}_vs_{safe_player2}.xlsx"
+    safe_date = date_str.replace("/", "-")
+    filename = f"{safe_date}_{player1.replace(' ', '_')}_vs_{player2.replace(' ', '_')}.xlsx"
+    full_path = os.path.join(folder_path, filename)
+    workbook.save(full_path)
+    return full_path

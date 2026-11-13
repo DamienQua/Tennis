@@ -1,7 +1,4 @@
-"""
-Strategy module for Alpha 5+ value betting evaluation,
-tracking, Excel generation, and notifications.
-"""
+"""Module strategy : détection Alpha 5+, suivi Excel et notifications SMTP."""
 
 from .alpha_strategy import evaluate_alpha_strategy, format_alpha_summary
 from .alpha_tracker import record_alpha_selection, get_session_bets, HEADERS

@@ -3,10 +3,11 @@ WTA_ELO.txt
 Matchs.txt
 Reviewed_Matchs.txt
 *.pyc
+__pycache__/
+.pytest_cache/
 *.xlsx
 *.xlsm
-Matchs
+Matchs/
 .env
-tests
-scratch
-analyze_complexity.py
+tests/
+scratch/

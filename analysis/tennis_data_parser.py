@@ -1,13 +1,11 @@
-"""
-Module for parsing player win percentages, match statistics, and activity data.
-"""
+"""Parsing des pourcentages de victoires et statistiques de match."""
 
 from typing import Any, List, Optional, Tuple
 from bs4 import BeautifulSoup
 
 
 class TennisDataParser:
-    """Parses player win percentages, match history, and performance statistics."""
+    """Extrait les ratios de victoires et statistiques de service depuis BeautifulSoup."""
 
     @staticmethod
     def _extract_single_percentage(percentage_str: str) -> float:
@@ -22,29 +20,28 @@ class TennisDataParser:
 
     @classmethod
     def parse_win_percentages(cls, data: Optional[BeautifulSoup]) -> List[float]:
-        """Parses win percentages across all surfaces from HTML."""
+        """Extrait les pourcentages de victoires sur différentes fenêtres."""
         if not data or not getattr(data, "text", None):
             return []
         text = data.text
         lower_text = text.lower()
 
         def split_after(marker: str) -> List[str]:
-            """Splits string after specified delimiter safely."""
             pos = lower_text.find(marker.lower())
             return [text[pos + len(marker):]] if pos >= 0 else []
 
         win_percentages = (
-            text.split("Matches")[1:3] +
-            split_after("months)") +
-            split_after("2000)")
+            text.split("Matches")[1:3]
+            + split_after("months)")
+            + split_after("2000)")
         )
         return [cls._extract_single_percentage(part) for part in win_percentages]
 
     @staticmethod
     def parse_match_statistics(
-            stats_match: Optional[BeautifulSoup]
+        stats_match: Optional[BeautifulSoup],
     ) -> Tuple[int, float, float, float]:
-        """Parses serve and return statistics from match HTML."""
+        """Extrait la durée (minutes) et les pourcentages au service."""
         if not stats_match:
             return 0, 0.0, 0.0, 0.0
         try:
@@ -61,26 +58,26 @@ class TennisDataParser:
                     return 0.0
                 return float(cols[idx].text.replace("N/A", "0").strip().split("%")[0])
 
-            per_first_serve = _extract_pct(9)
-            points_first_serve = _extract_pct(12)
-            per_save_bp = _extract_pct(18)
-            return min_tour, per_first_serve, points_first_serve, per_save_bp
+            return (
+                min_tour,
+                _extract_pct(9),
+                _extract_pct(12),
+                _extract_pct(18),
+            )
         except (IndexError, ValueError, AttributeError, TypeError):
             return 0, 0.0, 0.0, 0.0
 
 
 class StatisticsProcessor:
-    """Delegates statistical parsing operations for tennis match data."""
+    """Façade de traitement statistique."""
 
     @staticmethod
     def calculate_win_percentages(data: Optional[BeautifulSoup]) -> List[float]:
-        """Calculates win percentages from parsed activity data."""
         return TennisDataParser.parse_win_percentages(data)
 
     @staticmethod
     async def process_match_statistics(
-            data_fetcher, matches_list: List[Any], m_i: int, *args, **kwargs
+        data_fetcher, matches_list: List[Any], m_i: int
     ) -> Tuple[int, float, float, float]:
-        """Processes match statistics asynchronously for given match index."""
         stats_match = await data_fetcher.fetch_match_statistics(matches_list[m_i])
         return TennisDataParser.parse_match_statistics(stats_match)

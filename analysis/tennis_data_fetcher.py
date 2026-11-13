@@ -1,31 +1,29 @@
-"""
-Module for fetching tennis match and player activity data asynchronously from TennisInsight.
-"""
+"""Client asynchrone TennisInsight avec cache LRU et retries."""
 
 import asyncio
-from typing import Any, Dict, Optional
-
+from collections import OrderedDict
+from typing import Any, Optional, Tuple
 import aiohttp
 from bs4 import BeautifulSoup
 
 
 class TennisDataFetcher:
-    """Retrieves HTML and statistical data asynchronously with retry logic."""
+    """Récupère les panneaux AJAX TennisInsight de manière asynchrone."""
 
-    _activity_pane_cache: Dict[str, str] = {}
+    _activity_pane_cache: OrderedDict[str, str] = OrderedDict()
+    _MAX_CACHE_SIZE = 256
 
-    def __init__(self, session: aiohttp.ClientSession, admin_url: Optional[str] = None):
+    def __init__(self, session: aiohttp.ClientSession, admin_url: Optional[str] = None) -> None:
         self.session = session
         self.admin_url = admin_url
 
-    async def fetch_data(self, url: str, data: Any = None, method: str = 'POST') -> str:
-        """Fetches HTML data asynchronously with retry logic."""
-        max_retries = 3
-        for attempt in range(max_retries):
+    async def fetch_data(self, url: str, data: Any = None, method: str = "POST") -> str:
+        """Exécute une requête HTTP avec backoff linéaire sur 3 tentatives."""
+        for attempt in range(3):
             try:
                 req = (
                     self.session.get(url)
-                    if method.upper() == 'GET'
+                    if method.upper() == "GET"
                     else self.session.post(url, data=data)
                 )
                 async with req as response:
@@ -35,7 +33,7 @@ class TennisDataFetcher:
                             return text
             except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
                 pass
-            if attempt < max_retries - 1:
+            if attempt < 2:
                 await asyncio.sleep(1.5 * (attempt + 1))
         return ""
 
@@ -51,14 +49,19 @@ class TennisDataFetcher:
         return ""
 
     async def fetch_tournament_data(self, match_id: str, default_tour: str = "") -> str:
-        """Fetches tournament metadata and parses tournament name."""
+        """Récupère le nom officiel du tournoi depuis le panneau activity."""
         try:
-            if match_id not in TennisDataFetcher._activity_pane_cache:
+            if match_id not in self._activity_pane_cache:
                 pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
-                TennisDataFetcher._activity_pane_cache[match_id] = await self.fetch_data(
-                    self.admin_url, pane_req
-                )
-            soup = BeautifulSoup(TennisDataFetcher._activity_pane_cache[match_id], "lxml")
+                html = await self.fetch_data(self.admin_url, pane_req)
+                if html:
+                    self._activity_pane_cache[match_id] = html
+                    if len(self._activity_pane_cache) > self._MAX_CACHE_SIZE:
+                        self._activity_pane_cache.popitem(last=False)
+            else:
+                self._activity_pane_cache.move_to_end(match_id)
+
+            soup = BeautifulSoup(self._activity_pane_cache.get(match_id, ""), "lxml")
             tour_name = self._extract_tournament_name(soup)
             if tour_name:
                 return tour_name
@@ -67,13 +70,13 @@ class TennisDataFetcher:
         return default_tour or ""
 
     async def fetch_player_activity(
-            self,
-            player_id: str,
-            match_id: str,
-            activity_option: int,
-            odds_option: str = "0"
+        self,
+        player_id: str,
+        match_id: str,
+        activity_option: int,
+        odds_option: str = "0",
     ) -> BeautifulSoup:
-        """Fetches player activity pane HTML for a given page index."""
+        """Télécharge un onglet d'activité joueur."""
         player_param = {
             "action": "playerActivity",
             "activityOffset": "0",
@@ -81,36 +84,39 @@ class TennisDataFetcher:
             "odds": str(odds_option),
             "filterType": "basic",
             "playerID": player_id,
-            "matchID": match_id
+            "matchID": match_id,
         }
         data_html = await self.fetch_data(self.admin_url, player_param)
         return BeautifulSoup(data_html, "lxml")
 
-    async def fetch_player_activities(self, player_id: str, match_id: str):
-        """Fetches activity and surface statistics panes concurrently."""
-        return await asyncio.gather(
+    async def fetch_player_activities(
+        self, player_id: str, match_id: str
+    ) -> Tuple[BeautifulSoup, BeautifulSoup]:
+        """Télécharge simultanément l'activité globale et par surface."""
+        res1, res2 = await asyncio.gather(
             self.fetch_player_activity(player_id, match_id, 1),
-            self.fetch_player_activity(player_id, match_id, 2)
+            self.fetch_player_activity(player_id, match_id, 2),
         )
+        return res1, res2
 
     async def fetch_player_activity_with_odds(
-            self, player_id: str, match_id: str, activity_option: int, flag: int, favorite: Any
+        self, player_id: str, match_id: str, activity_option: int, flag: int, favorite: Any
     ) -> BeautifulSoup:
-        """Fetches activity pane and odds spread concurrently."""
+        """Télécharge les performances du joueur selon son statut favori/outsider."""
         odds_option = "5" if favorite[flag] == 1 else "6"
         return await self.fetch_player_activity(
             player_id, match_id, activity_option, odds_option
         )
 
     async def fetch_match_statistics(self, match_element) -> Optional[BeautifulSoup]:
-        """Fetches detailed statistics for a specific match element."""
+        """Télécharge les statistiques détaillées d'un match passé."""
         try:
             a_tags = match_element.find_all("a") if match_element else []
             valid_link = len(a_tags) >= 2 and a_tags[1].has_attr("data-action")
             if valid_link and a_tags[1].has_attr("data-matchid"):
                 action_data = {
                     "action": a_tags[1]["data-action"],
-                    "matchID": a_tags[1]["data-matchid"]
+                    "matchID": a_tags[1]["data-matchid"],
                 }
                 stats_match_html = await self.fetch_data(self.admin_url, action_data)
                 return BeautifulSoup(stats_match_html, "lxml")

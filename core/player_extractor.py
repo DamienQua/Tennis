@@ -1,64 +1,62 @@
-"""
-Module for extracting player identifiers and clean names from match HTML and metadata.
-"""
+"""Extraction des identifiants et noms normalisés des joueurs."""
 
 import re
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
+from bs4 import BeautifulSoup
 
 
 class PlayerExtractor:
-    """Extracts player identifiers and normalized names from match preview data."""
+    """Extrait les IDs et noms propres des joueurs depuis la page de preview."""
+
+    PLAYER_ALIASES = {
+        "Cori Gauff": "Coco Gauff",
+    }
 
     @staticmethod
-    def _ids_from_soup(soup_abc):
+    def _ids_from_soup(soup_abc: Optional[BeautifulSoup]) -> List[str]:
         if not soup_abc:
             return []
-        seen = []
-        for link_elem in soup_abc.find_all('a'):
-            href = link_elem.get('href', '')
-            if '/player/?playerid=' in href:
-                match_obj = re.search(r'playerid=(\d+)', href)
-                valid_link = (
-                    match_obj
-                    and match_obj.group(1) not in seen
-                    and 'General Comments' not in link_elem.text
-                )
-                if valid_link:
+        seen: List[str] = []
+        for link_elem in soup_abc.find_all("a"):
+            href = link_elem.get("href", "")
+            if "/player/?playerid=" in href and "General Comments" not in link_elem.text:
+                match_obj = re.search(r"playerid=(\d+)", href)
+                if match_obj and match_obj.group(1) not in seen:
                     seen.append(match_obj.group(1))
         return seen
 
     @staticmethod
-    def _ids_from_regex(abc):
-        raw = re.findall(r'/player/\?playerid=(\d+)', abc)
+    def _ids_from_regex(html_text: str) -> List[str]:
+        raw = re.findall(r"/player/\?playerid=(\d+)", html_text)
         if len(raw) < 2:
-            raw = re.findall(r'playerid=(\d+)', abc)
-        seen = []
+            raw = re.findall(r"playerid=(\d+)", html_text)
+        seen: List[str] = []
         for pid in raw:
             if pid not in seen:
                 seen.append(pid)
         return seen
 
     @classmethod
-    def extract_player_ids(cls, abc: str, soup_abc=None) -> Tuple[str, str]:
-        """Extracts unique player IDs for player A and player B."""
+    def extract_player_ids(
+        cls, html_text: str, soup_abc: Optional[BeautifulSoup] = None
+    ) -> Tuple[str, str]:
+        """Extrait les identifiants uniques des joueurs A et B."""
         ids = cls._ids_from_soup(soup_abc)
-        if len(ids) < 2 and isinstance(abc, str):
-            ids = cls._ids_from_regex(abc)
+        if len(ids) < 2 and isinstance(html_text, str):
+            ids = cls._ids_from_regex(html_text)
         player_a_id = ids[0] if len(ids) > 0 else ""
         player_b_id = ids[1] if len(ids) > 1 else ""
         return player_a_id, player_b_id
 
-    @staticmethod
-    def clean_player_name(name: str) -> str:
-        """Cleans player name string by removing unwanted suffixes."""
-        cleaned = re.sub(r'^\s*[\(\[][A-Za-z0-9/]+[\)\]]\s*', '', name.strip())
+    @classmethod
+    def clean_player_name(cls, name: str) -> str:
+        """Nettoie les têtes de série, suffixes et alias connus."""
+        cleaned = re.sub(r"^\s*[\(\[][A-Za-z0-9/]+[\)\]]\s*", "", name.strip())
         cleaned = cleaned.replace("-Vinolas", "").replace(" Vitus Nodskov", "").strip()
-        if cleaned == "Cori Gauff":
-            return "Coco Gauff"
-        return cleaned
+        return cls.PLAYER_ALIASES.get(cleaned, cleaned)
 
     @classmethod
-    def _names_from_title(cls, soup_abc) -> Optional[Tuple[str, str]]:
+    def _names_from_title(cls, soup_abc: BeautifulSoup) -> Optional[Tuple[str, str]]:
         titles = soup_abc.find_all(class_="profile-title")
         if len(titles) >= 2:
             player_a = cls.clean_player_name(titles[0].text)
@@ -68,15 +66,16 @@ class PlayerExtractor:
         return None
 
     @classmethod
-    def _names_from_links(cls, soup_abc) -> Optional[Tuple[str, str]]:
-        players = []
+    def _names_from_links(cls, soup_abc: BeautifulSoup) -> Optional[Tuple[str, str]]:
+        players: List[str] = []
         seen_ids = set()
-        for link_elem in soup_abc.find_all('a'):
-            href = link_elem.get('href', '')
-            if '/player/?playerid=' in href:
-                pid = href.split('playerid=')[-1]
-                text = link_elem.text.strip()
-                if pid not in seen_ids and text and 'General Comments' not in text:
+        for link_elem in soup_abc.find_all("a"):
+            href = link_elem.get("href", "")
+            match_id = re.search(r"playerid=(\d+)", href)
+            text = link_elem.text.strip()
+            if match_id and text and "General Comments" not in text:
+                pid = match_id.group(1)
+                if pid not in seen_ids:
                     seen_ids.add(pid)
                     players.append(cls.clean_player_name(text))
         return (players[0], players[1]) if len(players) >= 2 else None
@@ -93,21 +92,22 @@ class PlayerExtractor:
 
     @staticmethod
     def _names_from_slug(match_url: str) -> Optional[Tuple[str, str]]:
-        parts = [part for part in match_url.split('/') if part]
+        parts = [part for part in match_url.split("/") if part]
         match_slug = parts[-1] if parts else ""
-        if '-vs-' in match_slug:
-            slug_parts = match_slug.split('-vs-')
+        if "-vs-" in match_slug:
+            slug_parts = match_slug.split("-vs-")
             if len(slug_parts) >= 2:
-                name_a = slug_parts[0].replace('-', ' ').title()
-                name_b = slug_parts[1].replace('-', ' ').title()
-                return name_a, name_b
+                return (
+                    slug_parts[0].replace("-", " ").title(),
+                    slug_parts[1].replace("-", " ").title(),
+                )
         return None
 
     @classmethod
     def extract_player_names(
-            cls, soup_abc, match_url: str, data_text: str = ""
+        cls, soup_abc: BeautifulSoup, match_url: str, data_text: str = ""
     ) -> Tuple[str, str]:
-        """Extracts player names from title, links, overview, or URL slug."""
+        """Extrait les noms des joueurs avec chaîne de repli."""
         return (
             cls._names_from_title(soup_abc)
             or cls._names_from_links(soup_abc)

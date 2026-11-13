@@ -1,66 +1,65 @@
-"""
-Asynchronously fetch and parse ELO ratings from Tennis Abstract for a given gender.
+"""Récupération asynchrone des classements ELO depuis Tennis Abstract."""
 
-This function retrieves ELO ratings for male or female tennis players from the
-Tennis Abstract website, and writes them to a text file while returning them.
-
-Args:
-    m_w (str): Gender specification, either 'men' or 'women'
-
-Returns:
-    str: A string containing ELO ratings for tennis players
-
-Notes:
-    - Creates a text file named '{m_w}_ELO.txt' with the parsed ratings
-    - Uses a cached HTTP request to improve performance
-    - Requires an internet connection to fetch the latest ratings
-"""
-
-from typing import Dict
-
+from typing import Dict, Optional
 import aiohttp
 from bs4 import BeautifulSoup
 
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
 class EloFetcher:
-    """Fetches and caches ELO ratings HTML content."""
+    """Télécharge et met en cache les pages HTML des classements ELO."""
+
     cache: Dict[str, str] = {}
 
     @classmethod
-    async def fetch_data(cls, url: str, user_agent: str) -> str:
-        """Fetches Elo table web page asynchronously."""
+    async def fetch_data(
+        cls,
+        url: str,
+        user_agent: str = DEFAULT_USER_AGENT,
+        session: Optional[aiohttp.ClientSession] = None,
+    ) -> str:
+        """Récupère le HTML ELO en réutilisant la session HTTP si fournie."""
         if url in cls.cache:
             return cls.cache[url]
-        headers = {'User-Agent': user_agent}
-        timeout = aiohttp.ClientTimeout(total=15.0)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+
+        headers = {"User-Agent": user_agent}
+        if session is not None:
             async with session.get(url, headers=headers) as response:
+                response.raise_for_status()
                 content = await response.text()
-                cls.cache[url] = content
-                return content
+        else:
+            timeout = aiohttp.ClientTimeout(total=15.0)
+            async with aiohttp.ClientSession(timeout=timeout) as temp_session:
+                async with temp_session.get(url, headers=headers) as response:
+                    response.raise_for_status()
+                    content = await response.text()
 
-_FETCH_CACHE = EloFetcher.cache
-fetch_data = EloFetcher.fetch_data
+        cls.cache[url] = content
+        return content
 
-async def elo_table(m_w: str) -> str:
-    """Retrieves and formats live Elo table for ATP or WTA circuit."""
-    table = ""
-    elo = ""
-    user_agent = (
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'
-    )
-    url = "https://tennisabstract.com/reports/" + m_w.lower() + "_elo_ratings.html"
 
-    content = await fetch_data(url, user_agent)
-    soup = BeautifulSoup(content, 'lxml')
+async def elo_table(
+    circuit: str, session: Optional[aiohttp.ClientSession] = None
+) -> str:
+    """Récupère et formate la table ELO ATP ou WTA."""
+    url = f"https://tennisabstract.com/reports/{circuit.lower()}_elo_ratings.html"
+    content = await EloFetcher.fetch_data(url, session=session)
+    soup = BeautifulSoup(content, "lxml")
     tr_elements = soup.find_all("tr")[3:]
 
-    with open(f"{m_w}_ELO.txt", "w", encoding="utf-8") as file_handle:
-        for table_row in tr_elements:
-            table_cells = table_row.find_all("td")
-            name = table_cells[1].text.replace("\xa0", " ")
-            table = f"{name} {table_cells[6].text} {table_cells[8].text} {table_cells[10].text}\n"
-            file_handle.write(table)
-            elo += table
+    lines = []
+    for row in tr_elements:
+        cells = row.find_all("td")
+        if len(cells) < 11:
+            continue
+        name = cells[1].text.replace("\xa0", " ").strip()
+        lines.append(f"{name} {cells[6].text} {cells[8].text} {cells[10].text}\n")
 
-    return elo
+    elo_str = "".join(lines)
+    with open(f"{circuit}_ELO.txt", "w", encoding="utf-8") as file_handle:
+        file_handle.write(elo_str)
+    return elo_str

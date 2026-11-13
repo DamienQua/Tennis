@@ -1,58 +1,41 @@
-"""
-Tennis data analysis module for fetching and analyzing player and match data.
+"""Calcul des composantes de l'indice de confiance (Motivation, Tactique, Surface)."""
 
-This module provides classes and functions for:
-- Fetching tennis-related data asynchronously
-- Analyzing player motivation based on recent match history
-- Analyzing match tactics and performance
-- Calculating confidence indices for tennis match predictions
-
-The module supports different analysis types including:
-- Motivation analysis
-- Tactics analysis
-- Surface performance analysis
-
-Key components:
-- TennisDataFetcher: Handles asynchronous data retrieval
-- MotivationAnalyzer: Evaluates player motivation
-- TacticsAnalyzer: Examines match statistics and tactics
-- indice_confiance: Main function coordinating different analysis types
-"""
-
-import asyncio
 from datetime import date
-
+import logging
 import aiohttp
 from bs4 import BeautifulSoup
-
-from analysis.tennis_data_fetcher import TennisDataFetcher
 from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
 from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
-from utils.helpers import get_arg
+from analysis.tennis_data_fetcher import TennisDataFetcher
+from core.models import ConfidenceMetrics
+
+logger = logging.getLogger(__name__)
+
 
 class MotivationAnalyzer:
-    """Analyzes player motivation by tracking tournament tiers and recent activity count."""
+    """Évalue la motivation d'un joueur selon la catégorie du tournoi et son volume de jeu."""
 
-    def __init__(self, data_fetcher, admin_url, indice_tab):
+    def __init__(
+        self,
+        data_fetcher: TennisDataFetcher,
+        admin_url: str,
+        confidence: ConfidenceMetrics,
+    ) -> None:
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
-        self.indice_tab = indice_tab
+        self.confidence = confidence
         self.surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
 
-    async def analyze(self, player_id, match_id, surface, flag):
-        """Executes tactical analysis on match URL and updates confidence indices."""
+    async def analyze(self, player_id: str, match_id: str, surface: str, flag: int) -> None:
+        """Exécute l'analyse de motivation et de rang surface."""
         data_html = await self.fetch_player_activity(player_id, match_id)
         data = BeautifulSoup(data_html, "lxml")
-
         cat = self.get_tournament_category(data)
         nb_matchs = self.count_matches(data)
-
         self.calculate_motivation_index(cat, nb_matchs, flag)
-
         await self.analyze_surface_performance(match_id, surface, flag)
 
-    async def fetch_player_activity(self, player_id, match_id):
-        """Fetches player activity pane HTML from admin URL."""
+    async def fetch_player_activity(self, player_id: str, match_id: str) -> str:
         player_param = {
             "action": "playerActivity",
             "activityOffset": "0",
@@ -60,13 +43,12 @@ class MotivationAnalyzer:
             "odds": "0",
             "filterType": "basic",
             "playerID": player_id,
-            "matchID": match_id
+            "matchID": match_id,
         }
         return await self.data_fetcher.fetch_data(self.admin_url, player_param)
 
     @staticmethod
-    def get_tournament_category(data):
-        """Extracts tournament tier or category from activity table."""
+    def get_tournament_category(data: BeautifulSoup) -> str:
         try:
             table = data.find(id="activity-table") if data else None
             if table:
@@ -78,14 +60,14 @@ class MotivationAnalyzer:
         return "250"
 
     @staticmethod
-    def _get_year_index(show_class, year):
+    def _get_year_index(show_class, year: int) -> int:
         for idx, item in enumerate(show_class):
             if str(year) in item.text:
                 return idx + 1
         return -1
 
     @staticmethod
-    def _count_matches_in_year(show_class, start_index):
+    def _count_matches_in_year(show_class, start_index: int) -> int:
         count = 0
         for idx in range(start_index, len(show_class)):
             if show_class[idx].text == "Date":
@@ -93,65 +75,66 @@ class MotivationAnalyzer:
             count += 1
         return count
 
-    def count_matches(self, data):
-        """Counts matches played by player in current season."""
+    def count_matches(self, data: BeautifulSoup) -> int:
         try:
             table = data.find(id="activity-table") if data else None
             if not table:
                 return -1
             show_class = table.find_all(class_="show")
-            year = date.today().year
-            start_index = self._get_year_index(show_class, year)
+            start_index = self._get_year_index(show_class, date.today().year)
             if start_index == -1:
                 return -1
             return self._count_matches_in_year(show_class, start_index)
         except (AttributeError, IndexError, TypeError):
             return -1
 
-    def calculate_motivation_index(self, cat, nb_matchs, flag):
-        """Calculates motivation index based on tier and match count."""
-        index = 2 * flag
+    def calculate_motivation_index(self, cat: str, nb_matchs: int, flag: int) -> None:
         thresholds = {
             "250": (0, 2),
             "500": (0, 2),
-            "1000": (0, float('inf')),
-            "Slam": (0, float('inf'))
+            "1000": (0, float("inf")),
+            "Slam": (0, float("inf")),
         }
+        score = 0.0
         matched = False
         for key, (low, high) in thresholds.items():
             if key in cat:
-                if nb_matchs < 0:
-                    self.indice_tab[index] = 0
-                elif low <= nb_matchs < high:
-                    self.indice_tab[index] = 50
-                else:
-                    self.indice_tab[index] = 100
+                if nb_matchs >= 0:
+                    score = 50.0 if low <= nb_matchs < high else 100.0
                 matched = True
                 break
-        if not matched:
-                # Fallback for unknown categories (e.g. "WTA Ch"): same logic as 250/500
-            if nb_matchs < 0:
-                self.indice_tab[index] = 0
-            elif nb_matchs < 2:
-                self.indice_tab[index] = 50
-            else:
-                self.indice_tab[index] = 100
 
-    async def analyze_surface_performance(self, match_id, surface, flag):
-        """Analyzes surface performance rank and updates confidence indices."""
-        self.indice_tab[2*flag+1] = await self.surface_analyzer.analyze(match_id, surface, flag)
+        if not matched and nb_matchs >= 0:
+            score = 50.0 if nb_matchs < 2 else 100.0
+
+        if flag == 0:
+            self.confidence.motivation_a = score
+        else:
+            self.confidence.motivation_b = score
+
+    async def analyze_surface_performance(self, match_id: str, surface: str, flag: int) -> None:
+        rank_score = float(await self.surface_analyzer.analyze(match_id, surface, flag))
+        if flag == 0:
+            self.confidence.surface_rank_a = rank_score
+        else:
+            self.confidence.surface_rank_b = rank_score
+
 
 class TacticsAnalyzer:
-    """Analyzes tactical serving, returning, and tiebreak metrics from match stats."""
+    """Analyse les statistiques tactiques du dernier affrontement H2H sur surface."""
 
-    def __init__(self, data_fetcher, admin_url, indice_tab):
+    def __init__(
+        self,
+        data_fetcher: TennisDataFetcher,
+        admin_url: str,
+        confidence: ConfidenceMetrics,
+    ) -> None:
         self.data_fetcher = data_fetcher
         self.admin_url = admin_url
-        self.indice_tab = indice_tab
+        self.confidence = confidence
         self.stats_analyzer = MatchStatisticsAnalyzer()
 
-    async def analyze(self, match_url, flag):
-        """Analyzes tactical serve, return, and tiebreak metrics from match stats."""
+    async def analyze(self, match_url: str, flag: int) -> None:
         try:
             match_id = self.extract_match_id(match_url)
             if not match_id:
@@ -159,53 +142,55 @@ class TacticsAnalyzer:
             stats_match = await self.fetch_match_stats(match_id)
             if not stats_match:
                 return
-            serve_return_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
-            tiebreak_stats = self.stats_analyzer.calculate_tiebreak_stats(stats_match)
-            self.indice_tab[6:18] = serve_return_stats
-            self.indice_tab[18:20] = tiebreak_stats
-        except (IndexError, ValueError, AttributeError, TypeError, KeyError):
-            pass
+            self.confidence.tactical_pairs = (
+                self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
+            )
+            self.confidence.tiebreak_pair = (
+                self.stats_analyzer.calculate_tiebreak_stats(stats_match)
+            )
+        except (IndexError, ValueError, AttributeError, TypeError, KeyError) as err:
+            logger.debug("Stats tactiques indisponibles pour %s : %s", match_url, err)
 
     @staticmethod
-    def extract_match_id(match_url):
-        """Extracts numeric match ID from match preview URL."""
+    def extract_match_id(match_url: str) -> str:
         if match_url and "match/" in match_url:
             parts = match_url.split("match/")[1].split("/")
             return parts[0] if parts else ""
         return ""
 
-    async def fetch_match_stats(self, match_id):
-        """Fetches match statistics pane HTML for match ID."""
+    async def fetch_match_stats(self, match_id: str) -> BeautifulSoup:
         req = {"action": "showMatchStats", "matchID": match_id, "refresh": "true"}
         stats_match_html = await self.data_fetcher.fetch_data(self.admin_url, req)
         return BeautifulSoup(stats_match_html, "lxml")
 
-async def indice_confiance(*args, match_url="", indice_tab=None, **kwargs):
-    """Main entry point for confidence index calculation across categories."""
-    session = get_arg(args, 0, kwargs.get("session"))
-    admin_url = get_arg(args, 1, kwargs.get("admin_url"))
-    player_id = get_arg(args, 2, kwargs.get("player_id"))
-    match_id = get_arg(args, 3, kwargs.get("match_id"))
-    surface = get_arg(args, 4, kwargs.get("surface"))
-    flag = get_arg(args, 5, kwargs.get("flag", 0))
-    choix = get_arg(args, 6, kwargs.get("choix", ""))
-    match_url = kwargs.get("match_url", get_arg(args, 7, match_url))
-    indice_tab = kwargs.get("indice_tab", get_arg(args, 8, indice_tab))
 
-    if indice_tab is None:
-        from utils.variables import indice_tab as default_tab
-        indice_tab = default_tab
+async def indice_confiance(
+    session: aiohttp.ClientSession,
+    admin_url: str,
+    player_id: str,
+    match_id: str,
+    surface: str,
+    flag: int = 0,
+    choix: str = "",
+    match_url: str = "",
+    confidence: ConfidenceMetrics | None = None,
+) -> ConfidenceMetrics:
+    """Point d'entrée typé du calcul de l'indice de confiance."""
+    conf = confidence if confidence is not None else ConfidenceMetrics()
     data_fetcher = TennisDataFetcher(session)
 
     if choix == "Motivation":
-        motivation_analyzer = MotivationAnalyzer(data_fetcher, admin_url, indice_tab)
-        await motivation_analyzer.analyze(player_id, match_id, surface, flag)
-
+        analyzer = MotivationAnalyzer(data_fetcher, admin_url, conf)
+        await analyzer.analyze(player_id, match_id, surface, flag)
     elif choix == "Tactique":
-        tactics_analyzer = TacticsAnalyzer(data_fetcher, admin_url, indice_tab)
-        await tactics_analyzer.analyze(match_url, flag)
-
+        tactics = TacticsAnalyzer(data_fetcher, admin_url, conf)
+        await tactics.analyze(match_url, flag)
     elif choix == "Surface":
-        surface_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
-        indice_tab[2*flag+1] = await surface_analyzer.analyze(match_id, surface, flag)
-    return indice_tab
+        surf_analyzer = SurfacePerformanceAnalyzer(data_fetcher, admin_url)
+        score = float(await surf_analyzer.analyze(match_id, surface, flag))
+        if flag == 0:
+            conf.surface_rank_a = score
+        else:
+            conf.surface_rank_b = score
+
+    return conf

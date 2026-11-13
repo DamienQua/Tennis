@@ -1,8 +1,5 @@
-"""
-Utilities module providing date helpers and global variable definitions.
-"""
+"""Module utilitaire exposant les helpers de date."""
 
 from .helpers import DateHelper
-from .variables import indice_tab
 
-__all__ = ["DateHelper", "indice_tab"]
+__all__ = ["DateHelper"]
