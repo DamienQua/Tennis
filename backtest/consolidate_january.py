@@ -13,7 +13,7 @@ from backtest.backtest_engine import BacktestEngine, print_backtest_summary
 from backtest.historical_odds import HistoricalOddsProvider
 from backtest.strategy_evaluator import StrategyEvaluator
 from data_providers.elo_matcher import EloMatcher
-from data_providers.elo_table import elo_table
+from data_providers.elo_finder import elo_table
 
 
 def _extract_match_data(worksheet: Any) -> Optional[Dict[str, Any]]:

@@ -17,7 +17,7 @@ from core.analyze_match import analyze_match, clear_session_bets, get_session_be
 from core.database import TennisDatabase
 from core.match_filter import MatchFilter
 from core.models import MatchAnalysisData
-from data_providers.elo_table import elo_table
+from data_providers.elo_finder import elo_table
 from strategy.email_notifier import send_daily_email
 from strategy.result_settler import update_pending_results
 

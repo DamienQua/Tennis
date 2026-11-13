@@ -13,7 +13,7 @@ from backtest.backtest_engine import BacktestEngine, print_backtest_summary
 from backtest.tournament_crawler import TournamentCrawler
 from core.analyze_match import analyze_match
 from core.models import MatchAnalysisData
-from data_providers.elo_table import elo_table
+from data_providers.elo_finder import elo_table
 from main import login
 
 os.environ.pop("SSLKEYLOGFILE", None)
