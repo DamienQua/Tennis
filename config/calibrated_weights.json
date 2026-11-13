@@ -1,0 +1,32 @@
+{
+  "hard": {
+    "rank": 2.49,
+    "form": 3.16,
+    "surface": 4.08,
+    "elo": 0.0613,
+    "trj": 0.9,
+    "samples": 12941,
+    "brier_before": 0.223,
+    "brier_after": 0.2269
+  },
+  "clay": {
+    "rank": 2.87,
+    "form": 3.25,
+    "surface": 3.69,
+    "elo": 0.0442,
+    "trj": 0.9,
+    "samples": 5920,
+    "brier_before": 0.2219,
+    "brier_after": 0.2269
+  },
+  "grass": {
+    "rank": 2.75,
+    "form": 3.67,
+    "surface": 3.44,
+    "elo": 0.025,
+    "trj": 0.9,
+    "samples": 2725,
+    "brier_before": 0.2272,
+    "brier_after": 0.2305
+  }
+}

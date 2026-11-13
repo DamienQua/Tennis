@@ -1,10 +1,12 @@
-"""Récupération asynchrone des cotes bookmakers depuis OddsPortal."""
+"""Récupération asynchrone des cotes bookmakers depuis OddsPortal (Singles à venir)."""
 
 import asyncio
 import re
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import aiohttp
 from core.models import MatchAnalysisData
+
+_Q = r'(?:&quot;|\\"|")'
 
 
 async def fetch_odds(session: aiohttp.ClientSession, player: str) -> str:
@@ -21,18 +23,49 @@ async def fetch_odds(session: aiohttp.ClientSession, player: str) -> str:
     return ""
 
 
+def _is_finished_chunk(chunk: str) -> bool:
+    """Détecte si un bloc événement JSON correspond à un match déjà terminé."""
+    low = chunk.lower()
+    return (
+        '"isfinished":true' in low
+        or '&quot;isfinished&quot;:true' in low
+        or '"status":"finished"' in low
+        or '&quot;status&quot;:&quot;finished&quot;' in low
+    )
+
+
+def _extract_json_events(text: str) -> List[Tuple[str, str, str]]:
+    """Extrait les événements (titre, cote1, cote2) non terminés depuis le JSON intégré."""
+    events: List[Tuple[str, str, str]] = []
+    chunks = re.split(rf"(?={_Q}home-name{_Q})", text)
+    pat_home = rf"{_Q}home-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
+    pat_away = rf"{_Q}away-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
+
+    for chunk in chunks[1:]:
+        if _is_finished_chunk(chunk[:1500]):
+            continue
+        home = re.search(pat_home, chunk)
+        away = re.search(pat_away, chunk)
+        if not (home and away):
+            continue
+        title = f"{home.group(1)} - {away.group(1)}"
+        if "/" in title:
+            continue
+        odds1, odds2 = _extract_odds_values(chunk[:2500])
+        if odds1 and odds2:
+            events.append((title, odds1, odds2))
+    return events
+
+
 def _extract_match_name(text: str) -> Optional[str]:
-    pattern_home = r'(?:&quot;|\\")home-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")'
-    pattern_away = r'(?:&quot;|\\")away-name(?:&quot;|\\"):(?:&quot;|\\")([^\\"]+)(?:&quot;|\\")'
-    home = re.search(pattern_home, text)
-    away = re.search(pattern_away, text)
+    pat_home = rf"{_Q}home-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
+    pat_away = rf"{_Q}away-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
+    home = re.search(pat_home, text)
+    away = re.search(pat_away, text)
     if home and away:
         return f"{home.group(1)} - {away.group(1)}"
 
-    pat_name = (
-        r'(?:&quot;|\\")name(?:&quot;|\\"):'
-        r'(?:&quot;|\\")([A-Z][^\\"]*?\s*-\s*[^\\"]+?)(?:&quot;|\\")'
-    )
+    pat_name = rf"{_Q}name{_Q}:{_Q}([A-Z][^{{\}}\"\\]*?\s*-\s*[^{{\}}\"\\]+?){_Q}"
     match_name = re.search(pat_name, text)
     if match_name:
         return match_name.group(1)
@@ -42,19 +75,24 @@ def _extract_match_name(text: str) -> Optional[str]:
 
 
 def _extract_odds_values(text: str) -> Tuple[Optional[str], Optional[str]]:
-    odds = re.findall(r'(?:&quot;|\\")maxOdds(?:&quot;|\\"):([\d.]+)', text)
+    odds = re.findall(rf"{_Q}maxOdds{_Q}:([\d.]+)", text)
     if not odds:
         odds = re.findall(r'class="font-primary font-bold">([\d.]+)</p>', text)
     if not odds:
-        odds = re.findall(r'(?:&quot;|\\")avgOdds(?:&quot;|\\"):([\d.]+)', text)
+        odds = re.findall(rf"{_Q}avgOdds{_Q}:([\d.]+)", text)
     return (odds[0], odds[1]) if len(odds) >= 2 else (None, None)
 
 
 def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Extrait l'intitulé du match et les deux cotes."""
+    """Extrait l'intitulé du match simple à venir et les deux cotes."""
     if not text:
         return None, None, None
+    events = _extract_json_events(text)
+    if events:
+        return events[0]
     name = _extract_match_name(text)
+    if name and "/" in name:
+        return None, None, None
     odds1, odds2 = _extract_odds_values(text)
     return name, odds1, odds2
 
@@ -62,7 +100,9 @@ def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]
 def _assign_player_odds(
     match_title: str, odds: Tuple[float, float], match: MatchAnalysisData
 ) -> bool:
-    """Vérifie que les DEUX joueurs sont présents dans le titre avant assignation."""
+    """Vérifie que c'est un simple (pas de '/') et que les DEUX joueurs correspondent."""
+    if not match_title or "/" in match_title:
+        return False
     title_low = match_title.lower()
     p1_last = match.player_a.name.split()[-1].lower()
     p2_last = match.player_b.name.split()[-1].lower()
@@ -91,6 +131,14 @@ def _update_odds_indices(match: MatchAnalysisData) -> None:
 
 def process_odds(html: str, match: MatchAnalysisData) -> bool:
     """Parse et applique les cotes bookmakers au match si valides."""
+    if not html:
+        return False
+
+    for title, odds1, odds2 in _extract_json_events(html):
+        if _assign_player_odds(title, (float(odds1), float(odds2)), match):
+            _update_odds_indices(match)
+            return True
+
     name, odds1, odds2 = extract_data(html)
     if not (name and odds1 and odds2):
         return False
