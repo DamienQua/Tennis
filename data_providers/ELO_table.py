@@ -1,5 +1,7 @@
-"""Récupération asynchrone des classements ELO depuis Tennis Abstract."""
+"""Récupération asynchrone des classements ELO avec cache disque TTL."""
 
+import os
+import time
 from typing import Dict, Optional
 import aiohttp
 from bs4 import BeautifulSoup
@@ -8,6 +10,7 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+ELO_CACHE_TTL_SECONDS = 12 * 3600  # 12 heures
 
 
 class EloFetcher:
@@ -22,7 +25,6 @@ class EloFetcher:
         user_agent: str = DEFAULT_USER_AGENT,
         session: Optional[aiohttp.ClientSession] = None,
     ) -> str:
-        """Récupère le HTML ELO en réutilisant la session HTTP si fournie."""
         if url in cls.cache:
             return cls.cache[url]
 
@@ -42,10 +44,30 @@ class EloFetcher:
         return content
 
 
+def _read_fresh_cache(filepath: str, max_age_seconds: int) -> Optional[str]:
+    """Retourne le contenu du fichier local s'il existe et n'a pas expiré."""
+    if not os.path.exists(filepath):
+        return None
+    age = time.time() - os.path.getmtime(filepath)
+    if age <= max_age_seconds:
+        with open(filepath, "r", encoding="utf-8") as file_handle:
+            content = file_handle.read()
+            if content.strip():
+                return content
+    return None
+
+
 async def elo_table(
-    circuit: str, session: Optional[aiohttp.ClientSession] = None
+    circuit: str,
+    session: Optional[aiohttp.ClientSession] = None,
+    ttl_seconds: int = ELO_CACHE_TTL_SECONDS,
 ) -> str:
-    """Récupère et formate la table ELO ATP ou WTA."""
+    """Récupère la table ELO ATP/WTA depuis le cache disque ou Tennis Abstract."""
+    cache_file = f"{circuit}_ELO.txt"
+    cached = _read_fresh_cache(cache_file, ttl_seconds)
+    if cached is not None:
+        return cached
+
     url = f"https://tennisabstract.com/reports/{circuit.lower()}_elo_ratings.html"
     content = await EloFetcher.fetch_data(url, session=session)
     soup = BeautifulSoup(content, "lxml")
@@ -60,6 +82,6 @@ async def elo_table(
         lines.append(f"{name} {cells[6].text} {cells[8].text} {cells[10].text}\n")
 
     elo_str = "".join(lines)
-    with open(f"{circuit}_ELO.txt", "w", encoding="utf-8") as file_handle:
+    with open(cache_file, "w", encoding="utf-8") as file_handle:
         file_handle.write(elo_str)
     return elo_str

@@ -1,4 +1,4 @@
-"""Stratégie de détection Value Betting Alpha 5+ All-Court."""
+"""Stratégie de détection Value Betting Alpha 5+ All-Court avec dimensionnement Kelly."""
 
 from typing import Any, Dict, Tuple
 from core.models import MatchAnalysisData
@@ -8,6 +8,9 @@ MAX_BOOK_ODDS = 2.50
 MIN_EV_THRESHOLD = 0.03
 MIN_ELO_GAP = 150.0
 MODEL_MARGIN = 0.90
+
+KELLY_FRACTION = 0.25  # Quart de Kelly pour limiter la variance
+MAX_STAKE_PCT = 3.0    # Plafond à 3% de la bankroll par pari
 
 
 def _calculate_probabilities(model_1: float, model_2: float) -> Tuple[float, float]:
@@ -25,6 +28,18 @@ def _calc_raw_ev(prob: float, book_odds: float) -> float:
     return (prob * book_odds - 1.0) if (prob > 0 and book_odds > 0) else 0.0
 
 
+def calculate_kelly_stake(prob: float, book_odds: float) -> float:
+    """Calcule la mise conseillée en % de bankroll via Kelly fractionné."""
+    if book_odds <= 1.0 or prob <= 0.0:
+        return 0.0
+    net_odds = book_odds - 1.0
+    full_kelly = (prob * net_odds - (1.0 - prob)) / net_odds
+    if full_kelly <= 0.0:
+        return 0.0
+    fractional_pct = full_kelly * KELLY_FRACTION * 100.0
+    return round(min(fractional_pct, MAX_STAKE_PCT), 2)
+
+
 def _check_candidate(prob: float, book_odds: float, elo_diff: float) -> Tuple[bool, float]:
     raw_ev = _calc_raw_ev(prob, book_odds)
     in_range = MIN_BOOK_ODDS <= book_odds <= MAX_BOOK_ODDS
@@ -32,19 +47,12 @@ def _check_candidate(prob: float, book_odds: float, elo_diff: float) -> Tuple[bo
     return meets_criteria, raw_ev
 
 
-def _format_pct(val: float, is_valid: bool) -> str:
-    return f"{val * 100:+.1f}%" if is_valid else "-"
-
-
-def _format_diff(val: float, is_valid: bool) -> str:
-    return f"{val:+0.0f}" if is_valid else "-"
-
-
 def _build_bet_result(
     player: str, index: int, odds: Tuple[float, float, float], metrics: Tuple[float, float]
 ) -> Dict[str, Any]:
     book, model, prob = odds
     exp_val, elo_diff = metrics
+    kelly_pct = calculate_kelly_stake(prob, book)
     return {
         "bet_recommended": True,
         "selected_player": player,
@@ -55,8 +63,9 @@ def _build_bet_result(
         "ev": exp_val,
         "ev_percent": round(exp_val * 100, 2),
         "elo_diff": elo_diff,
-        "signal_j1": "PARI CONSEILLÉ" if index == 1 else "-",
-        "signal_j2": "PARI CONSEILLÉ" if index == 2 else "-",
+        "kelly_stake_pct": kelly_pct,
+        "signal_j1": f"PARI CONSEILLÉ ({kelly_pct:.2f}%)" if index == 1 else "-",
+        "signal_j2": f"PARI CONSEILLÉ ({kelly_pct:.2f}%)" if index == 2 else "-",
     }
 
 
@@ -72,25 +81,10 @@ def _build_no_bet_result(data_valid: bool) -> Dict[str, Any]:
         "ev": 0.0,
         "ev_percent": 0.0,
         "elo_diff": 0.0,
+        "kelly_stake_pct": 0.0,
         "signal_j1": reason,
         "signal_j2": reason,
     }
-
-
-def _assemble_final_dict(
-    base: Dict[str, Any],
-    data_valid: bool,
-    ev_pair: Tuple[float, float],
-    diff_pair: Tuple[float, float],
-) -> Dict[str, Any]:
-    ev_1, ev_2 = ev_pair
-    diff_1, diff_2 = diff_pair
-    base["ev_j1_str"] = _format_pct(ev_1, data_valid)
-    base["ev_j2_str"] = _format_pct(ev_2, data_valid)
-    base["elo_diff_j1_str"] = _format_diff(diff_1, data_valid)
-    base["elo_diff_j2_str"] = _format_diff(diff_2, data_valid)
-    base["summary"] = format_alpha_summary(base)
-    return base
 
 
 def format_alpha_summary(res: Dict[str, Any]) -> str:
@@ -99,7 +93,7 @@ def format_alpha_summary(res: Dict[str, Any]) -> str:
         return (
             f"SIGNAL ALPHA 5+: Pari conseillé sur {res['selected_player']} "
             f"@ {res['book_odds']:.2f} (EV: {res['ev_percent']:+.1f}%, "
-            f"ΔELO: {res['elo_diff']:+.0f})"
+            f"ΔELO: {res['elo_diff']:+.0f}, Mise Kelly: {res['kelly_stake_pct']:.2f}%)"
         )
     return (
         f"Stratégie Alpha 5+: Aucun signal "
@@ -130,4 +124,9 @@ def evaluate_alpha_strategy(match: MatchAnalysisData) -> Dict[str, Any]:
     else:
         base = _build_no_bet_result(data_valid)
 
-    return _assemble_final_dict(base, data_valid, (cand_1[1], cand_2[1]), diffs)
+    base["ev_j1_str"] = f"{cand_1[1] * 100:+.1f}%" if data_valid else "-"
+    base["ev_j2_str"] = f"{cand_2[1] * 100:+.1f}%" if data_valid else "-"
+    base["elo_diff_j1_str"] = f"{diffs[0]:+0.0f}" if data_valid else "-"
+    base["elo_diff_j2_str"] = f"{diffs[1]:+0.0f}" if data_valid else "-"
+    base["summary"] = format_alpha_summary(base)
+    return base

@@ -1,6 +1,7 @@
-"""Module core : modèles, filtrage, extraction et analyse."""
+"""Module core : modèles, base de données, filtrage, extraction et analyse."""
 
-from .analyze_match import analyze_match
+from .analyze_match import analyze_match, clear_session_bets, get_session_bets
+from .database import TennisDatabase
 from .match_filter import MatchFilter
 from .match_repository import MatchRepository
 from .models import ConfidenceMetrics, H2HMetrics, MatchAnalysisData, PlayerStats
@@ -20,6 +21,9 @@ from .tournament_extractor import (
 
 __all__ = [
     "analyze_match",
+    "get_session_bets",
+    "clear_session_bets",
+    "TennisDatabase",
     "MatchFilter",
     "MatchRepository",
     "MatchAnalysisData",

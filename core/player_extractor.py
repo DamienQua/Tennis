@@ -13,11 +13,11 @@ class PlayerExtractor:
     }
 
     @staticmethod
-    def _ids_from_soup(soup_abc: Optional[BeautifulSoup]) -> List[str]:
-        if not soup_abc:
+    def _ids_from_soup(soup_obj: Optional[BeautifulSoup]) -> List[str]:
+        if not soup_obj:
             return []
         seen: List[str] = []
-        for link_elem in soup_abc.find_all("a"):
+        for link_elem in soup_obj.find_all("a"):
             href = link_elem.get("href", "")
             if "/player/?playerid=" in href and "General Comments" not in link_elem.text:
                 match_obj = re.search(r"playerid=(\d+)", href)
@@ -27,6 +27,8 @@ class PlayerExtractor:
 
     @staticmethod
     def _ids_from_regex(html_text: str) -> List[str]:
+        if not isinstance(html_text, str) or not html_text:
+            return []
         raw = re.findall(r"/player/\?playerid=(\d+)", html_text)
         if len(raw) < 2:
             raw = re.findall(r"playerid=(\d+)", html_text)
@@ -38,12 +40,21 @@ class PlayerExtractor:
 
     @classmethod
     def extract_player_ids(
-        cls, html_text: str, soup_abc: Optional[BeautifulSoup] = None
+        cls,
+        html_text: str,
+        soup_main: Optional[BeautifulSoup] = None,
+        overview_text: str = "",
+        soup_overview: Optional[BeautifulSoup] = None,
     ) -> Tuple[str, str]:
-        """Extrait les identifiants uniques des joueurs A et B."""
-        ids = cls._ids_from_soup(soup_abc)
-        if len(ids) < 2 and isinstance(html_text, str):
+        """Extrait les identifiants uniques des joueurs A et B avec repli sur overview."""
+        ids = cls._ids_from_soup(soup_main)
+        if len(ids) < 2:
             ids = cls._ids_from_regex(html_text)
+        if len(ids) < 2:
+            ids = cls._ids_from_soup(soup_overview)
+        if len(ids) < 2:
+            ids = cls._ids_from_regex(overview_text)
+
         player_a_id = ids[0] if len(ids) > 0 else ""
         player_b_id = ids[1] if len(ids) > 1 else ""
         return player_a_id, player_b_id

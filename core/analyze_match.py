@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 import aiohttp
 from bs4 import BeautifulSoup
 
@@ -12,6 +12,7 @@ from analysis.compare_players import compare_players
 from analysis.h2h_table import h2h_table, MatchContext
 from analysis.indice_confiance import indice_confiance
 from analysis.last_matchs import last_matchs
+from core.database import TennisDatabase
 from core.models import MatchAnalysisData
 from core.player_extractor import extract_player_ids, extract_player_names
 from core.tournament_extractor import (
@@ -22,11 +23,22 @@ from core.tournament_extractor import (
 from data_providers.elo_matcher import EloMatcher
 from data_providers.odds_match import odds_match, fetch_both_odds
 from strategy.alpha_strategy import evaluate_alpha_strategy
-from strategy.alpha_tracker import record_alpha_selection
 from strategy.generate_match_xlsx import generate_match_xlsx
 
 logger = logging.getLogger(__name__)
 ADMIN_URL = "https://tennisinsight.com/wp-admin/admin-ajax.php"
+
+SESSION_BETS: List[Dict[str, Any]] = []
+
+
+def get_session_bets() -> List[Dict[str, Any]]:
+    """Retourne une copie des paris Alpha 5+ détectés pendant la session."""
+    return list(SESSION_BETS)
+
+
+def clear_session_bets() -> None:
+    """Réinitialise la liste en mémoire des paris de la session."""
+    SESSION_BETS.clear()
 
 
 async def _attempt_fetch(
@@ -35,7 +47,8 @@ async def _attempt_fetch(
     req = session.post(url, data=data) if method == "post" else session.get(url)
     async with req as response:
         if response.status == 200:
-            return await response.text()
+            text = await response.text()
+            return text if text and text.strip() else None
         return None
 
 
@@ -58,7 +71,7 @@ async def fetch_data(
 async def _fetch_match_soups(
     session: aiohttp.ClientSession, match_url: str
 ) -> Optional[Dict[str, Any]]:
-    """Télécharge et parse la page principale et le panneau overview AJAX."""
+    """Télécharge et parse la page principale et le panneau overview avec reprise sur DOM incomplet."""
     if not match_url or "match/" not in match_url:
         logger.warning("URL de match invalide : %s", match_url)
         return None
@@ -68,23 +81,36 @@ async def _fetch_match_soups(
         return None
 
     overview_req = {"action": "lazyLoadPanes", "pane": "overview", "matchID": match_id}
-    html_main, overview_html = await asyncio.gather(
-        fetch_data(session, match_url),
-        fetch_data(session, ADMIN_URL, "post", overview_req),
-    )
-    soup_main = BeautifulSoup(html_main, "lxml")
-    soup_overview = BeautifulSoup(overview_html, "lxml")
-    p_a_id, p_b_id = extract_player_ids(html_main, soup_main)
-    if not p_a_id or not p_b_id:
-        logger.warning("Identifiants joueurs introuvables pour %s", match_url)
-        return None
+    html_main = ""
+    overview_html = ""
 
-    return {
-        "match_id": match_id,
-        "soup_main": soup_main,
-        "soup_overview": soup_overview,
-        "ids": (p_a_id, p_b_id),
-    }
+    for attempt in range(2):
+        html_main, overview_html = await asyncio.gather(
+            fetch_data(session, match_url),
+            fetch_data(session, ADMIN_URL, "post", overview_req),
+        )
+        soup_main = BeautifulSoup(html_main, "lxml")
+        soup_overview = BeautifulSoup(overview_html, "lxml")
+        p_a_id, p_b_id = extract_player_ids(
+            html_main, soup_main, overview_html, soup_overview
+        )
+        if p_a_id and p_b_id:
+            return {
+                "match_id": match_id,
+                "soup_main": soup_main,
+                "soup_overview": soup_overview,
+                "ids": (p_a_id, p_b_id),
+            }
+        if attempt == 0:
+            await asyncio.sleep(1.5)
+
+    logger.warning(
+        "Identifiants joueurs introuvables pour %s (len_main=%d, len_overview=%d)",
+        match_url,
+        len(html_main),
+        len(overview_html),
+    )
+    return None
 
 
 def _populate_metadata(
@@ -146,8 +172,10 @@ async def _run_analysis_phases(
     await h2h_table(parsed["soup_overview"], match, session, ctx)
 
 
-def _evaluate_and_record_strategy(elo_data: str, match: MatchAnalysisData) -> None:
-    """Associe les cotes ELO, évalue Alpha 5+ et enregistre la sélection."""
+def _evaluate_and_record_strategy(
+    elo_data: str, match: MatchAnalysisData, db: Optional[TennisDatabase]
+) -> None:
+    """Associe les cotes ELO, évalue Alpha 5+ et enregistre le pari dans SQLite."""
     elo_a, elo_b = EloMatcher.find_elo_ratings(
         elo_data, match.player_a.name, match.player_b.name, match.surface
     )
@@ -158,14 +186,24 @@ def _evaluate_and_record_strategy(elo_data: str, match: MatchAnalysisData) -> No
 
     alpha_res = evaluate_alpha_strategy(match)
     print(f"  {alpha_res['summary']}")
-    record_alpha_selection(
-        tournament=match.tournament,
-        surface=match.surface,
-        player1=match.player_a.name,
-        player2=match.player_b.name,
-        alpha_res=alpha_res,
-        match_url=match.match_url,
-    )
+
+    if alpha_res.get("bet_recommended"):
+        inserted = db.save_bet(match, alpha_res) if db else True
+        if inserted:
+            SESSION_BETS.append({
+                "tournament": match.tournament,
+                "surface": match.surface,
+                "player1": match.player_a.name,
+                "player2": match.player_b.name,
+                "selected_player": alpha_res["selected_player"],
+                "book_odds": alpha_res["book_odds"],
+                "model_odds": alpha_res["model_odds"],
+                "model_prob": alpha_res["model_prob"],
+                "ev_percent": alpha_res["ev_percent"],
+                "elo_diff": alpha_res["elo_diff"],
+                "kelly_stake_pct": alpha_res["kelly_stake_pct"],
+                "match_url": match.match_url,
+            })
 
 
 async def analyze_match(
@@ -174,6 +212,7 @@ async def analyze_match(
     match_url: str,
     tournaments: Sequence[str],
     elo_data: str,
+    db: Optional[TennisDatabase] = None,
 ) -> Optional[MatchAnalysisData]:
     """Point d'entrée complet d'analyse d'un match."""
     parsed = await _fetch_match_soups(session, match_url)
@@ -190,6 +229,6 @@ async def analyze_match(
     compare_players(match)
     await odds_match(match, session=session, odds_future=odds_future)
     compare_indice(match)
-    _evaluate_and_record_strategy(elo_data, match)
-    generate_match_xlsx(match)
+    _evaluate_and_record_strategy(elo_data, match, db)
+    await asyncio.to_thread(generate_match_xlsx, match)
     return match

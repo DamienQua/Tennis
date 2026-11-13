@@ -1,7 +1,9 @@
 """Point d'entrée principal du pipeline asynchrone d'analyse de matchs de tennis."""
 
+import argparse
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import time
 from typing import List, NamedTuple, Optional, Sequence, Set, Tuple
@@ -11,18 +13,26 @@ from bs4 import BeautifulSoup
 from dotenv import dotenv_values
 import numpy as np
 
-from core.analyze_match import analyze_match
+from core.analyze_match import analyze_match, clear_session_bets, get_session_bets
+from core.database import TennisDatabase
 from core.match_filter import MatchFilter
-from core.match_repository import MatchRepository
+from core.models import MatchAnalysisData
 from data_providers.elo_table import elo_table
-from strategy.alpha_tracker import get_session_bets
 from strategy.email_notifier import send_daily_email
+from strategy.result_settler import update_pending_results
 
 os.environ.pop("SSLKEYLOGFILE", None)
+os.makedirs("logs", exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            "logs/tennis_ai.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+        ),
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -45,12 +55,14 @@ class MatchProcessor:
         header: dict,
         rate_limit: AsyncLimiter,
         already_processed: Set[str],
+        db: Optional[TennisDatabase] = None,
         match_filter: Optional[MatchFilter] = None,
     ) -> None:
         self.session = session
         self.header = header
         self.rate_limit = rate_limit
         self.already_processed = already_processed
+        self.db = db
         self.filter = match_filter or MatchFilter()
 
     def should_process(self, match_url: str) -> bool:
@@ -58,12 +70,11 @@ class MatchProcessor:
 
     async def fetch_and_analyze(
         self, match_url: str, tournaments: Sequence[str], elo_data: str
-    ) -> Optional[str]:
+    ) -> Optional[MatchAnalysisData]:
         async with self.rate_limit:
-            match_data = await analyze_match(
-                self.session, self.header, match_url, tournaments, elo_data
+            return await analyze_match(
+                self.session, self.header, match_url, tournaments, elo_data, db=self.db
             )
-            return match_data.to_summary_line() if match_data else None
 
     @staticmethod
     def format_result(match_info: str, match_url: str) -> str:
@@ -75,7 +86,7 @@ class MatchProcessor:
         tournaments: Sequence[str],
         elo_data: str,
         max_retries: int = 2,
-    ) -> Optional[str]:
+    ) -> Optional[MatchAnalysisData]:
         """Exécute l'analyse complète d'un match avec gestion des erreurs temporaires."""
         if not self.should_process(match_url):
             return None
@@ -83,10 +94,11 @@ class MatchProcessor:
         for attempt in range(max_retries):
             start = time.perf_counter()
             try:
-                match_info = await self.fetch_and_analyze(match_url, tournaments, elo_data)
-                if not match_info:
+                match_data = await self.fetch_and_analyze(match_url, tournaments, elo_data)
+                if not match_data:
                     return None
-                return self.finalize_result(match_info, match_url, start)
+                self.finalize_result(match_data.to_summary_line(), match_url, start)
+                return match_data
             except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError) as err:
                 if attempt < max_retries - 1:
                     logger.warning(
@@ -128,13 +140,13 @@ class BatchContext:
         self,
         processor: MatchProcessor,
         semaphore: asyncio.Semaphore,
-        repository: Optional[MatchRepository],
+        db: Optional[TennisDatabase],
         lock: asyncio.Lock,
         results: List[str],
     ) -> None:
         self.processor = processor
         self.semaphore = semaphore
-        self.repository = repository
+        self.db = db
         self.lock = lock
         self.results = results
 
@@ -213,15 +225,15 @@ async def _process_single_match(
     match_url: str, tournaments: Sequence[str], elo_data: str, ctx: BatchContext
 ) -> Optional[str]:
     async with ctx.semaphore:
-        match_info = await ctx.processor.process(match_url, tournaments, elo_data)
-        if match_info:
+        match_data = await ctx.processor.process(match_url, tournaments, elo_data)
+        if match_data:
+            line = f"{match_data.to_summary_line()}, {match_url}"
             async with ctx.lock:
-                ctx.results.append(match_info)
-                if ctx.repository:
-                    all_matchs = "\n".join(ctx.results) + "\n"
-                    ctx.repository.save_processed_match(match_info, all_matchs)
+                ctx.results.append(line)
+                if ctx.db:
+                    ctx.db.save_match(match_data)
         await asyncio.sleep(0.5)
-        return match_info
+        return match_data.to_summary_line() if match_data else None
 
 
 async def process_matches(
@@ -231,18 +243,22 @@ async def process_matches(
     match_urls: List[str],
     atp_elo: str = "",
     wta_elo: str = "",
-    repository: Optional[MatchRepository] = None,
+    db: Optional[TennisDatabase] = None,
     max_parallel_matches: int = 5,
 ) -> str:
     """Traite la liste des matchs en parallèle sous contrôle de débit."""
-    already = repository.load_reviewed_urls() if repository else set()
+    clear_session_bets()
+    if os.path.exists("Matchs.txt"):
+        os.remove("Matchs.txt")
+
+    already = db.load_reviewed_urls() if db else set()
     processor = MatchProcessor(
-        session, session_config.header, session_config.rate_limit, already
+        session, session_config.header, session_config.rate_limit, already, db=db
     )
     ctx = BatchContext(
         processor=processor,
         semaphore=asyncio.Semaphore(max_parallel_matches),
-        repository=repository,
+        db=db,
         lock=asyncio.Lock(),
         results=[],
     )
@@ -267,27 +283,43 @@ async def process_matches(
     return ("\n".join(ctx.results) + "\n") if ctx.results else ""
 
 
-def _notify_daily_results(matchs_str: str) -> None:
+def _notify_daily_results(matchs_str: str, excel_path: str) -> None:
     total_matches = len([line for line in (matchs_str or "").split("\n") if line.strip()])
     bets = get_session_bets()
-    send_daily_email(bets, total_matches=total_matches)
+    send_daily_email(bets, total_matches=total_matches, filepath=excel_path)
+
+
+def _parse_cli_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Pipeline d'analyse de matchs de tennis")
+    parser.add_argument(
+        "--update-results",
+        action="store_true",
+        help="Vérifie et met à jour les résultats des paris en attente",
+    )
+    return parser.parse_args()
 
 
 async def main() -> None:
     """Point d'entrée principal du pipeline."""
+    args = _parse_cli_args()
     session_config = create_session_config()
-    repository = MatchRepository()
+    db = TennisDatabase()
 
     async with aiohttp.ClientSession(
         connector=session_config.connector,
         headers=session_config.header,
         timeout=session_config.timeout,
     ) as session:
+        await login(session)
+
+        if args.update_results:
+            await update_pending_results(session, db)
+            return
+
         atp_elo, wta_elo = await asyncio.gather(
             elo_table("ATP", session=session),
             elo_table("WTA", session=session),
         )
-        await login(session)
         tournaments, match_urls = await fetch_match_previews(session)
         matchs = await process_matches(
             session=session,
@@ -296,12 +328,13 @@ async def main() -> None:
             match_urls=match_urls,
             atp_elo=atp_elo,
             wta_elo=wta_elo,
-            repository=repository,
+            db=db,
             max_parallel_matches=5,
         )
 
+    excel_path = db.export_bets_to_excel()
     print(matchs)
-    _notify_daily_results(matchs)
+    _notify_daily_results(matchs, excel_path=excel_path)
 
 
 if __name__ == "__main__":

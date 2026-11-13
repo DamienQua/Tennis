@@ -47,6 +47,7 @@ def _build_table_rows(bets: List[Dict[str, Any]]) -> str:
         prob = f"{bet_item.get('model_prob', 0.0) * 100:.1f}%"
         exp_val = f"{bet_item.get('ev_percent', 0.0):+.1f}%"
         diff = f"{bet_item.get('elo_diff', 0.0):+.0f}"
+        kelly = f"{bet_item.get('kelly_stake_pct', 0.0):.2f}%"
         tourn = html.escape(str(bet_item.get("tournament", "")))
         surf = html.escape(str(bet_item.get("surface", "")))
         player1 = html.escape(str(bet_item.get("player1", "")))
@@ -64,6 +65,7 @@ def _build_table_rows(bets: List[Dict[str, Any]]) -> str:
             <td style="padding: 10px;">{bet_item.get('model_odds', 0.0):.2f} ({prob})</td>
             <td style="padding: 10px; color: #2e7d32; font-weight: bold;">{exp_val}</td>
             <td style="padding: 10px;">{diff}</td>
+            <td style="padding: 10px; font-weight: bold; color: #1F4E79;">{kelly}</td>
         </tr>
         """)
     return "".join(rows)
@@ -91,6 +93,7 @@ def _build_html_content(bets: List[Dict[str, Any]], total_matches: int, date_str
                     <th style="padding: 10px;">Cote Modèle</th>
                     <th style="padding: 10px;">EV (%)</th>
                     <th style="padding: 10px;">ΔELO</th>
+                    <th style="padding: 10px;">Mise Kelly</th>
                 </tr>
             </thead>
             <tbody>

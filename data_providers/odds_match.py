@@ -9,9 +9,11 @@ from core.models import MatchAnalysisData
 
 async def fetch_odds(session: aiohttp.ClientSession, player: str) -> str:
     """Télécharge la page de recherche OddsPortal pour un joueur."""
+    if not player:
+        return ""
     url = f"https://www.oddsportal.com/search/{player}"
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
             if resp.status == 200:
                 return await resp.text()
     except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
@@ -50,6 +52,8 @@ def _extract_odds_values(text: str) -> Tuple[Optional[str], Optional[str]]:
 
 def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Extrait l'intitulé du match et les deux cotes."""
+    if not text:
+        return None, None, None
     name = _extract_match_name(text)
     odds1, odds2 = _extract_odds_values(text)
     return name, odds1, odds2
@@ -99,14 +103,15 @@ def process_odds(html: str, match: MatchAnalysisData) -> bool:
 async def fetch_both_odds(
     session: aiohttp.ClientSession, player1_name: str, player2_name: str
 ) -> Tuple[str, str]:
-    """Récupère les pages de cotes des deux joueurs en parallèle."""
+    """Tente le joueur 1 en priorité et court-circuite la 2e requête si trouvé."""
     surname_1 = player1_name.split()[-1] if player1_name else ""
     surname_2 = player2_name.split()[-1] if player2_name else ""
-    res1, res2 = await asyncio.gather(
-        fetch_odds(session, surname_1),
-        fetch_odds(session, surname_2),
-    )
-    return res1, res2
+    html1 = await fetch_odds(session, surname_1)
+    name, odds1, odds2 = extract_data(html1)
+    if name and odds1 and odds2:
+        return html1, ""
+    html2 = await fetch_odds(session, surname_2)
+    return html1, html2
 
 
 def apply_odds_data(html1: str, html2: str, match: MatchAnalysisData) -> MatchAnalysisData:
