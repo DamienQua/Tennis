@@ -9,7 +9,6 @@ _LAZY_EXPORTS = {
     "clear_session_bets": ("core.analyze_match", "clear_session_bets"),
     "TennisDatabase": ("core.database", "TennisDatabase"),
     "MatchFilter": ("core.match_filter", "MatchFilter"),
-    "MatchRepository": ("core.match_repository", "MatchRepository"),
     "MatchAnalysisData": ("core.models", "MatchAnalysisData"),
     "PlayerStats": ("core.models", "PlayerStats"),
     "H2HMetrics": ("core.models", "H2HMetrics"),

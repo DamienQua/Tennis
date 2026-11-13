@@ -1,0 +1,73 @@
+name: Daily Tennis AI Pipeline
+
+on:
+  schedule:
+    # 06:23 UTC (07:23 CET) - Avant ouverture sessions Europe + clôture nuit Amériques
+    - cron: "23 6 * * *"
+    # 13:23 UTC (14:23 CET) - Milieu journée Europe + avant ouverture sessions Amériques
+    - cron: "23 13 * * *"
+    # 21:23 UTC (22:23 CET) - Fin soirée Europe + avant ouverture sessions Asie/Océanie
+    - cron: "23 21 * * *"
+
+  # Permet de lancer le pipeline manuellement à tout moment depuis l'onglet Actions
+  workflow_dispatch:
+
+# Empêche deux exécutions simultanées de corrompre la base SQLite
+concurrency:
+  group: tennis-ai-pipeline-lock
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run-tennis-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout de la branche test_new_architecture
+        uses: actions/checkout@v4
+        with:
+          ref: test_new_architecture
+          fetch-depth: 1
+
+      - name: Configuration de Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Installation des dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Mise à jour des résultats en attente (ROI)
+        env:
+          TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN }}
+          TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD }}
+        run: python main.py --update-results
+
+      - name: Exécution de l'analyse et notification email
+        env:
+          TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN }}
+          TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
+        run: python main.py
+
+      - name: Sauvegarde de tennis_ai.db et Excel sur test_new_architecture
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f tennis_ai.db Paris_Alpha_5_Plus.xlsx || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(data): update tennis_ai.db & tracking excel [skip ci]"
+            git push origin HEAD:test_new_architecture
+          else
+            echo "Aucune nouvelle donnée à commiter."
+          fi

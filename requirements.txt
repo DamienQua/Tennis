@@ -1,6 +1,7 @@
 aiohttp
 beautifulsoup4
 numpy
+pandas
 jaro-winkler
 aiolimiter
 lxml
