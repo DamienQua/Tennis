@@ -1,7 +1,7 @@
 """Utilitaires de calcul et validation de dates pour le suivi des matchs."""
 
 from datetime import datetime
-from typing import Sequence
+from typing import Any, Sequence
 
 
 class DateHelper:
@@ -74,3 +74,8 @@ class DateHelper:
             except (ValueError, IndexError):
                 date_i -= 1
         return 0
+
+
+def get_arg(args: Sequence[Any], index: int, fallback: Any = None) -> Any:
+    """Récupère un élément positionnel dans args si disponible, sinon fallback."""
+    return args[index] if len(args) > index else fallback

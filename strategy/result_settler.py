@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import re
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 import aiohttp
 from bs4 import BeautifulSoup
-from core.database import TennisDatabase
+
+if TYPE_CHECKING:
+    from core.database import TennisDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ def _extract_winner_from_html(html: str) -> Optional[str]:
 
 
 async def _check_single_bet(
-    session: aiohttp.ClientSession, db: TennisDatabase, bet: dict
+    session: aiohttp.ClientSession, db: "TennisDatabase", bet: dict
 ) -> bool:
     url = bet["match_url"]
     try:
@@ -41,7 +43,7 @@ async def _check_single_bet(
 
 
 async def update_pending_results(
-    session: aiohttp.ClientSession, db: TennisDatabase
+    session: aiohttp.ClientSession, db: "TennisDatabase"
 ) -> int:
     """Parcourt les paris en attente et met à jour les matchs terminés."""
     pending = db.get_pending_bets()

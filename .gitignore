@@ -3,6 +3,8 @@ WTA_ELO.txt
 Matchs.txt
 Reviewed_Matchs.txt
 tennis_ai.db
+tennis_ai.db-shm
+tennis_ai.db-wal
 logs/
 *.pyc
 __pycache__/
@@ -11,5 +13,4 @@ __pycache__/
 *.xlsm
 Matchs/
 .env
-tests/
 scratch/

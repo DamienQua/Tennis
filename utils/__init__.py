@@ -1,5 +1,5 @@
-"""Module utilitaire exposant les helpers de date."""
+"""Module utilitaire exposant les helpers de date et d'arguments."""
 
-from .helpers import DateHelper
+from .helpers import DateHelper, get_arg
 
-__all__ = ["DateHelper"]
+__all__ = ["DateHelper", "get_arg"]

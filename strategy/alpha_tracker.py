@@ -70,19 +70,26 @@ def _create_or_load_wb(filepath: str):
     return workbook, sheet
 
 
+def _row_matches(row: tuple, clean_url: str, p1_l: str, p2_l: str) -> bool:
+    if len(row) < 5:
+        return False
+    row_url = str(row[-1] or "").strip().lower()
+    if clean_url and row_url == clean_url:
+        return True
+    r_p1 = str(row[3] or "").strip().lower()
+    r_p2 = str(row[4] or "").strip().lower()
+    return r_p1 == p1_l and r_p2 == p2_l
+
+
 def _is_duplicate(sheet, match_url: str, player1: str, player2: str) -> bool:
     clean_url = (match_url or "").strip().lower()
     p1_l = (player1 or "").strip().lower()
     p2_l = (player2 or "").strip().lower()
-    for row in sheet.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < 5:
-            continue
-        row_url = str(row[-1] or "").strip().lower()
-        if clean_url and row_url and clean_url == row_url:
-            return True
-        if str(row[3] or "").strip().lower() == p1_l and str(row[4] or "").strip().lower() == p2_l:
-            return True
-    return False
+    return any(
+        _row_matches(row, clean_url, p1_l, p2_l)
+        for row in sheet.iter_rows(min_row=2, values_only=True)
+        if row
+    )
 
 
 def _build_row(meta: Tuple[str, str, str, str], alpha_res: Dict[str, Any], match_url: str) -> list:
@@ -133,7 +140,6 @@ def _auto_fit_columns(sheet) -> None:
 
 
 def _save_safely(workbook, filepath: str) -> str:
-    """Sauvegarde le classeur avec repli si le fichier est verrouillé par Excel."""
     try:
         workbook.save(filepath)
         return filepath
@@ -141,7 +147,6 @@ def _save_safely(workbook, filepath: str) -> str:
         base, ext = os.path.splitext(filepath)
         fallback = f"{base}_backup{ext}"
         workbook.save(fallback)
-        print(f"Fichier '{filepath}' verrouillé (ouvert dans Excel). Sauvegardé dans '{fallback}'.")
         return fallback
 
 

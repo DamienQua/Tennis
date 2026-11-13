@@ -2,15 +2,90 @@
 
 from datetime import datetime
 import os
+from typing import Any, Optional
 import openpyxl
 from openpyxl.styles import Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
-from core.models import MatchAnalysisData
+from core.models import H2HMetrics, MatchAnalysisData, PlayerStats
 from strategy.alpha_strategy import evaluate_alpha_strategy
 
 
-def generate_match_xlsx(match: MatchAnalysisData) -> str:
+def _safe_get(vec: Any, idx: int, default: Any = "") -> Any:
+    return vec[idx] if len(vec) > idx else default
+
+
+def _to_float(val: Any) -> float:
+    try:
+        return float(str(val).strip()) if str(val).strip() else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _to_int(val: Any) -> int:
+    try:
+        return int(float(str(val).strip())) if str(val).strip() else 1000
+    except ValueError:
+        return 1000
+
+
+def _coerce_match_data(
+    match_or_vec: Any, player1: Optional[str] = None, player2: Optional[str] = None
+) -> MatchAnalysisData:
+    if isinstance(match_or_vec, MatchAnalysisData):
+        return match_or_vec
+    vec = match_or_vec
+    return MatchAnalysisData(
+        match_url="",
+        tournament=str(_safe_get(vec, 0)),
+        surface=str(_safe_get(vec, 1, "Hard")),
+        player_a=PlayerStats(
+            name=player1 or str(_safe_get(vec, 2)),
+            ranking=_to_int(_safe_get(vec, 4, 1000)),
+            win_pct_last_10=_to_float(_safe_get(vec, 14)),
+            win_pct_last_50=_to_float(_safe_get(vec, 15)),
+            win_pct_1y=_to_float(_safe_get(vec, 16)),
+            win_pct_career=_to_float(_safe_get(vec, 17)),
+            win_pct_1y_surface=_to_float(_safe_get(vec, 18)),
+            win_pct_career_surface=_to_float(_safe_get(vec, 19)),
+            matches_last_month=_to_int(_safe_get(vec, 20, 0)),
+            tournament_minutes=_to_int(_safe_get(vec, 21, 0)),
+            first_serve_pct=_to_float(_safe_get(vec, 22)),
+            first_serve_pts_won=_to_float(_safe_get(vec, 23)),
+            break_points_saved_pct=_to_float(_safe_get(vec, 24)),
+            model_odds=_to_float(_safe_get(vec, 36)),
+            book_odds=_to_float(_safe_get(vec, 38)),
+            elo=_to_float(_safe_get(vec, 40)),
+        ),
+        player_b=PlayerStats(
+            name=player2 or str(_safe_get(vec, 3)),
+            ranking=_to_int(_safe_get(vec, 5, 1000)),
+            win_pct_last_10=_to_float(_safe_get(vec, 25)),
+            win_pct_last_50=_to_float(_safe_get(vec, 26)),
+            win_pct_1y=_to_float(_safe_get(vec, 27)),
+            win_pct_career=_to_float(_safe_get(vec, 28)),
+            win_pct_1y_surface=_to_float(_safe_get(vec, 29)),
+            win_pct_career_surface=_to_float(_safe_get(vec, 30)),
+            matches_last_month=_to_int(_safe_get(vec, 31, 0)),
+            tournament_minutes=_to_int(_safe_get(vec, 32, 0)),
+            first_serve_pct=_to_float(_safe_get(vec, 33)),
+            first_serve_pts_won=_to_float(_safe_get(vec, 34)),
+            break_points_saved_pct=_to_float(_safe_get(vec, 35)),
+            model_odds=_to_float(_safe_get(vec, 37)),
+            book_odds=_to_float(_safe_get(vec, 39)),
+            elo=_to_float(_safe_get(vec, 41)),
+        ),
+        h2h=H2HMetrics(
+            all_time=(_to_float(_safe_get(vec, 6)), _to_float(_safe_get(vec, 7))),
+            last_year=(_to_float(_safe_get(vec, 8)), _to_float(_safe_get(vec, 9))),
+            surface=(_to_float(_safe_get(vec, 10)), _to_float(_safe_get(vec, 11))),
+            games=(_to_float(_safe_get(vec, 12)), _to_float(_safe_get(vec, 13))),
+        ),
+    )
+
+
+def generate_match_xlsx(match_or_vec: Any) -> str:
     """Génère le classeur Excel individuel du match et retourne son chemin."""
+    match = _coerce_match_data(match_or_vec)
     now = datetime.now()
     date_str = now.strftime("%d/%m/%Y")
     workbook = openpyxl.Workbook()
@@ -35,7 +110,10 @@ def _calculate_win_percentage(odds_value: float) -> float:
     return round(90.0 / odds_value, 2) if odds_value > 0 else 0.0
 
 
-def _prepare_match_data(match: MatchAnalysisData) -> list:
+def _prepare_match_data(
+    match_or_vec: Any, player1: Optional[str] = None, player2: Optional[str] = None
+) -> list:
+    match = _coerce_match_data(match_or_vec, player1, player2)
     pa, pb, h2h = match.player_a, match.player_b, match.h2h
     alpha = evaluate_alpha_strategy(match)
 

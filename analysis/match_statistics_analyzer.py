@@ -8,7 +8,6 @@ from bs4 import BeautifulSoup
 class MatchStatisticsAnalyzer:
     """Calcule les métriques tactiques à partir du HTML d'un match."""
 
-    # Offsets des colonnes statistiques dans le DOM TennisInsight
     IDX_FIRST_SERVE = 12
     IDX_SECOND_SERVE = 15
     IDX_BP_SAVED = 18
@@ -19,34 +18,41 @@ class MatchStatisticsAnalyzer:
     @classmethod
     def calculate_serve_return_stats(
         cls, stats_match: BeautifulSoup, flag: int
-    ) -> List[Tuple[float, float]]:
-        """Retourne les 6 paires (Joueur A, Joueur B) de stats service/retour."""
-        default_pairs: List[Tuple[float, float]] = [(0.0, 0.0)] * 6
+    ) -> List[float]:
+        """Retourne les 12 métriques (6 paires J1/J2) de service et retour."""
+        default_stats = [0.0] * 12
         if not stats_match:
-            return default_pairs
+            return default_stats
         try:
             offset_flag = 2 if flag == 1 else 0
             cols = stats_match.find_all(class_="col-xs-4")
             if len(cols) < cls.IDX_BP_CONVERTED + 1 + offset_flag:
-                return default_pairs
+                return default_stats
 
             def _val(offset: int) -> float:
                 raw = cols[offset + offset_flag].text.strip().split("%")[0]
                 return float(raw) if raw and raw != "N/A" else 0.0
 
-            metrics = [
-                _val(cls.IDX_FIRST_SERVE),
-                _val(cls.IDX_SECOND_SERVE),
-                _val(cls.IDX_RET_FIRST),
-                _val(cls.IDX_RET_SECOND),
-                _val(cls.IDX_BP_SAVED),
-                _val(cls.IDX_BP_CONVERTED),
-            ]
+            p_first = _val(cls.IDX_FIRST_SERVE)
+            p_second = _val(cls.IDX_SECOND_SERVE)
+            r_first = _val(cls.IDX_RET_FIRST)
+            r_second = _val(cls.IDX_RET_SECOND)
+            p_bp = _val(cls.IDX_BP_SAVED)
+            r_bp = _val(cls.IDX_BP_CONVERTED)
+
             if flag == 0:
-                return [(val, 100.0 - val) for val in metrics]
-            return [(100.0 - val, val) for val in metrics]
+                return [
+                    p_first, 100.0 - p_first, p_second, 100.0 - p_second,
+                    r_first, 100.0 - r_first, r_second, 100.0 - r_second,
+                    p_bp, 100.0 - p_bp, r_bp, 100.0 - r_bp,
+                ]
+            return [
+                100.0 - p_first, p_first, 100.0 - p_second, p_second,
+                100.0 - r_first, r_first, 100.0 - r_second, r_second,
+                100.0 - p_bp, p_bp, 100.0 - r_bp, r_bp,
+            ]
         except (IndexError, ValueError, AttributeError, TypeError):
-            return default_pairs
+            return default_stats
 
     def calculate_tiebreak_stats(self, stats_match: BeautifulSoup) -> Tuple[float, float]:
         """Calcule le pourcentage de tie-breaks remportés par chaque joueur."""

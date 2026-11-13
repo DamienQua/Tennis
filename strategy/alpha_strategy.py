@@ -1,7 +1,11 @@
 """Stratégie de détection Value Betting Alpha 5+ All-Court avec dimensionnement Kelly."""
 
-from typing import Any, Dict, Tuple
-from core.models import MatchAnalysisData
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Dict, Tuple
+from utils.helpers import get_arg
+
+if TYPE_CHECKING:
+    from core.models import MatchAnalysisData
 
 MIN_BOOK_ODDS = 1.40
 MAX_BOOK_ODDS = 2.50
@@ -9,8 +13,15 @@ MIN_EV_THRESHOLD = 0.03
 MIN_ELO_GAP = 150.0
 MODEL_MARGIN = 0.90
 
-KELLY_FRACTION = 0.25  # Quart de Kelly pour limiter la variance
-MAX_STAKE_PCT = 3.0    # Plafond à 3% de la bankroll par pari
+KELLY_FRACTION = 0.25
+MAX_STAKE_PCT = 3.0
+
+
+def _safe_float(val: Any) -> float:
+    try:
+        return float(str(val).replace(",", ".").strip())
+    except (ValueError, TypeError, AttributeError):
+        return 0.0
 
 
 def _calculate_probabilities(model_1: float, model_2: float) -> Tuple[float, float]:
@@ -64,8 +75,8 @@ def _build_bet_result(
         "ev_percent": round(exp_val * 100, 2),
         "elo_diff": elo_diff,
         "kelly_stake_pct": kelly_pct,
-        "signal_j1": f"PARI CONSEILLÉ ({kelly_pct:.2f}%)" if index == 1 else "-",
-        "signal_j2": f"PARI CONSEILLÉ ({kelly_pct:.2f}%)" if index == 2 else "-",
+        "signal_j1": "PARI CONSEILLÉ" if index == 1 else "-",
+        "signal_j2": "PARI CONSEILLÉ" if index == 2 else "-",
     }
 
 
@@ -101,9 +112,31 @@ def format_alpha_summary(res: Dict[str, Any]) -> str:
     )
 
 
-def evaluate_alpha_strategy(match: MatchAnalysisData) -> Dict[str, Any]:
-    """Évalue la stratégie Alpha 5+ sur un match typé."""
-    pa, pb = match.player_a, match.player_b
+def _extract_players_adapter(args: tuple, kwargs: dict) -> Tuple[Any, Any]:
+    """Résout (player_a, player_b) sans importer core.models au runtime."""
+    if args and hasattr(args[0], "player_a"):
+        return args[0].player_a, args[0].player_b
+    if "match" in kwargs and hasattr(kwargs["match"], "player_a"):
+        return kwargs["match"].player_a, kwargs["match"].player_b
+
+    pa = SimpleNamespace(
+        model_odds=_safe_float(get_arg(args, 0, kwargs.get("model_1", 0.0))),
+        book_odds=_safe_float(get_arg(args, 2, kwargs.get("book_1", 0.0))),
+        elo=_safe_float(get_arg(args, 4, kwargs.get("elo_1", 0.0))),
+        name=str(get_arg(args, 6, kwargs.get("player_1", "Joueur 1"))),
+    )
+    pb = SimpleNamespace(
+        model_odds=_safe_float(get_arg(args, 1, kwargs.get("model_2", 0.0))),
+        book_odds=_safe_float(get_arg(args, 3, kwargs.get("book_2", 0.0))),
+        elo=_safe_float(get_arg(args, 5, kwargs.get("elo_2", 0.0))),
+        name=str(get_arg(args, 7, kwargs.get("player_2", "Joueur 2"))),
+    )
+    return pa, pb
+
+
+def evaluate_alpha_strategy(*args, **kwargs) -> Dict[str, Any]:
+    """Évalue la stratégie Alpha 5+ sur MatchAnalysisData ou paramètres bruts."""
+    pa, pb = _extract_players_adapter(args, kwargs)
     data_valid = (
         min(pa.model_odds, pb.model_odds, pa.book_odds, pb.book_odds) > 1.01
         and min(pa.elo, pb.elo) > 0

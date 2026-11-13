@@ -6,9 +6,11 @@ import aiohttp
 from bs4 import BeautifulSoup
 from analysis.match_statistics_processor import MatchStatisticsProcessor
 from analysis.tennis_data_fetcher import TennisDataFetcher
-from analysis.tennis_data_parser import StatisticsProcessor
+from analysis.tennis_data_parser import StatisticsProcessor, TennisDataParser
 from core.models import MatchAnalysisData
 from utils.helpers import DateHelper
+
+__all__ = ["TennisMatchAnalyzer", "TennisDataParser", "last_matchs"]
 
 
 class TennisMatchAnalyzer:

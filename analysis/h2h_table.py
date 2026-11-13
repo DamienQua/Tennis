@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 import re
-from typing import Tuple
+from typing import Any, Tuple
 import aiohttp
 from bs4 import BeautifulSoup
 from analysis.h2h_stats import H2HStats, DateUtils
@@ -21,12 +21,17 @@ class MatchContext:
 
 
 class H2HDataProcessor:
-    """Parse les lignes HTML H2H et calcule H2HMetrics."""
+    """Parse les lignes HTML H2H (compatible MatchAnalysisData et vecteur match_vs)."""
 
-    def __init__(self, data: BeautifulSoup, match: MatchAnalysisData) -> None:
+    def __init__(self, data: BeautifulSoup, match: Any) -> None:
         self.data = data
         self.match = match
-        self.stats = H2HStats(match.player_a.name, match.player_b.name)
+        self._is_typed = isinstance(match, MatchAnalysisData)
+        name_a = match.player_a.name if self._is_typed else str(match[2])
+        name_b = match.player_b.name if self._is_typed else str(match[3])
+        self.surface = match.surface if self._is_typed else str(match[1])
+        self.player_a_name = name_a
+        self.stats = H2HStats(name_a, name_b)
         self.go_url = ""
         self.flag = 0
 
@@ -34,11 +39,32 @@ class H2HDataProcessor:
         """Exécute le comptage et le parsing des confrontations passées."""
         self._process_h2h_count()
         self._process_h2h_matches()
-        self.match.h2h = self.stats.to_metrics()
+        self._apply_metrics()
+
+    def process_h2h_data(self) -> None:
+        """Alias rétrocompatible de process()."""
+        self.process()
+
+    def _reset_metrics(self) -> None:
+        if self._is_typed:
+            self.match.h2h = H2HMetrics()
+        else:
+            self.match[6:14] = [0] * 8
+
+    def _apply_metrics(self) -> None:
+        metrics = self.stats.to_metrics()
+        if self._is_typed:
+            self.match.h2h = metrics
+        elif self.stats.p_a.wins_all + self.stats.p_b.wins_all == 0:
+            self.match[6:14] = [0] * 8
+        else:
+            self.match[6:14] = (
+                metrics.all_time + metrics.last_year + metrics.surface + metrics.games
+            )
 
     def _process_h2h_count(self) -> None:
         if not self.data or not getattr(self.data, "text", None) or "series " not in self.data.text:
-            self.match.h2h = H2HMetrics()
+            self._reset_metrics()
             return
         ind = 1 if "tied" in self.data.text else 0
         for idx in range(2):
@@ -49,7 +75,7 @@ class H2HDataProcessor:
             except (IndexError, ValueError):
                 pass
         if self.stats.h2h_nb == 0:
-            self.match.h2h = H2HMetrics()
+            self._reset_metrics()
 
     @staticmethod
     def _parse_row_score(raw_score: str) -> str:
@@ -69,7 +95,6 @@ class H2HDataProcessor:
             score = cls._parse_row_score(tds[4].text.strip())
             return date_ms, surface_m, winner, score
 
-        # Repli texte brut si la structure des colonnes diffère
         lines = [line.strip() for line in row_elem.text.strip().split("\n") if line.strip()]
         tab_parts = row_elem.text.strip().split("\t")
         date_ms = DateUtils.parse_date(tab_parts[0].strip()) if tab_parts else 0.0
@@ -84,7 +109,7 @@ class H2HDataProcessor:
             links = row_elem.find_all("a")
             if links:
                 self.go_url = links[-1].get("href", "")
-                self.flag = 0 if winner == self.match.player_a.name else 1
+                self.flag = 0 if winner == self.player_a_name else 1
 
     def _process_h2h_matches(self) -> None:
         h2h_elem = self.data.find(class_="h2h-matches") if self.data else None
@@ -92,7 +117,7 @@ class H2HDataProcessor:
             return
         for row_elem in h2h_elem.find_all("tr")[1:]:
             date_ms, surface_m, winner, score = self._extract_match_details(row_elem)
-            self.stats.update_stats(winner, date_ms, surface_m, score, self.match.surface)
+            self.stats.update_stats(winner, date_ms, surface_m, score, self.surface)
             self._update_go_flag(row_elem, surface_m, winner)
 
 

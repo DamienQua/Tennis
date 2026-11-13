@@ -49,11 +49,11 @@ class PlayerExtractor:
         """Extrait les identifiants uniques des joueurs A et B avec repli sur overview."""
         ids = cls._ids_from_soup(soup_main)
         if len(ids) < 2:
-            ids = cls._ids_from_regex(html_text)
+            ids = cls._ids_from_regex(html_text) or ids
         if len(ids) < 2:
-            ids = cls._ids_from_soup(soup_overview)
+            ids = cls._ids_from_soup(soup_overview) or ids
         if len(ids) < 2:
-            ids = cls._ids_from_regex(overview_text)
+            ids = cls._ids_from_regex(overview_text) or ids
 
         player_a_id = ids[0] if len(ids) > 0 else ""
         player_b_id = ids[1] if len(ids) > 1 else ""

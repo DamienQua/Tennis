@@ -2,6 +2,7 @@
 
 from datetime import date
 import logging
+from typing import Optional
 import aiohttp
 from bs4 import BeautifulSoup
 from analysis.match_statistics_analyzer import MatchStatisticsAnalyzer
@@ -142,9 +143,10 @@ class TacticsAnalyzer:
             stats_match = await self.fetch_match_stats(match_id)
             if not stats_match:
                 return
-            self.confidence.tactical_pairs = (
-                self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
-            )
+            flat_stats = self.stats_analyzer.calculate_serve_return_stats(stats_match, flag)
+            self.confidence.tactical_pairs = [
+                (flat_stats[i], flat_stats[i + 1]) for i in range(0, len(flat_stats), 2)
+            ]
             self.confidence.tiebreak_pair = (
                 self.stats_analyzer.calculate_tiebreak_stats(stats_match)
             )
@@ -173,7 +175,7 @@ async def indice_confiance(
     flag: int = 0,
     choix: str = "",
     match_url: str = "",
-    confidence: ConfidenceMetrics | None = None,
+    confidence: Optional[ConfidenceMetrics] = None,
 ) -> ConfidenceMetrics:
     """Point d'entrée typé du calcul de l'indice de confiance."""
     conf = confidence if confidence is not None else ConfidenceMetrics()

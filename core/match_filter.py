@@ -1,7 +1,7 @@
 """Règles de filtrage des URLs d'aperçus de matchs."""
 
 from datetime import datetime
-from typing import Set
+from typing import Set, Union
 
 
 class MatchFilter:
@@ -30,7 +30,9 @@ class MatchFilter:
         return any(name in url_low for name in cls.SPECIAL_PLAYERS)
 
     @classmethod
-    def should_process(cls, match_url: str, already_processed: Set[str]) -> bool:
+    def should_process(
+        cls, match_url: str, already_processed: Union[Set[str], str] = ""
+    ) -> bool:
         """Applique les règles d'exclusion, de déduplication et d'éligibilité."""
         url_clean = match_url.strip()
         if any(pattern in url_clean for pattern in cls.EXCLUDED_PATTERNS):
