@@ -13,7 +13,7 @@ async def fetch_odds(session: aiohttp.ClientSession, player: str) -> str:
     """Télécharge la page de recherche OddsPortal pour un joueur."""
     if not player:
         return ""
-    url = f"https://www.oddsportal.com/search/{player}"
+    url = f"https://www.oddsportal.com/search/{player}/tennis/"
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
             if resp.status == 200:
