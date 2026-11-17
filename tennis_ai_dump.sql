@@ -19,7 +19,7 @@ CREATE TABLE bets (
                     profit_units REAL DEFAULT 0.0
                 , closing_odds REAL DEFAULT 0.0, clv_percent REAL DEFAULT 0.0);
 INSERT INTO "bets" VALUES(1,'https://tennisinsight.com/match/260564112/2026-indian-wells-wta-champs/rr/aryna-sabalenka-vs-elina-svitolina','13/11/2026 11:41','Indian Wells WTA Champs','Hard','Aryna Sabalenka','Elina Svitolina','Aryna Sabalenka',1.51,1.23,7.33766233766233733e-01,10.8,1.70600000000000136e+02,3.0,'En attente','',0.0,1.48,2.03);
-INSERT INTO "bets" VALUES(2,'https://tennisinsight.com/match/260764108/2026-colina-wta-ch/r32/maria-carle-vs-veronika-erjavec','16/11/2026 22:58','Colina WTA Ch','Clay','Maria Carle','Veronika Erjavec','Veronika Erjavec',1.67,1.05,8.58490566037735769e-01,43.37,1531.6,3.0,'En attente','',0.0,1.67,0.0);
+INSERT INTO "bets" VALUES(2,'https://tennisinsight.com/match/260764108/2026-colina-wta-ch/r32/maria-carle-vs-veronika-erjavec','16/11/2026 22:58','Colina WTA Ch','Clay','Maria Carle','Veronika Erjavec','Veronika Erjavec',1.67,1.05,8.58490566037735769e-01,43.37,1531.6,3.0,'En attente','',0.0,1.66,0.6);
 CREATE TABLE matches (
                     match_url TEXT PRIMARY KEY,
                     analyzed_at TEXT NOT NULL,
@@ -86,6 +86,8 @@ INSERT INTO "matches" VALUES('https://tennisinsight.com/match/260764108/2026-col
 INSERT INTO "matches" VALUES('https://tennisinsight.com/match/260764112/2026-colina-wta-ch/r32/barbara-gatica-vs-andrea-lazaro-garcia','2026-11-16T22:58:57','Colina WTA Ch','Clay','Barbara Gatica','Andrea Lazaro Garcia',7.71,1.02,3.3,1.36,0.0,1590.0,0.5,'Colina WTA Ch, Clay, Barbara Gatica, Andrea Lazaro Garcia, 7.71, 1.02, 3.3, 1.36, , 1590.0, 68.0, 62.0, 0.5, 58.33, 55.38');
 INSERT INTO "matches" VALUES('https://tennisinsight.com/match/260764114/2026-colina-wta-ch/r32/polona-hercog-vs-miriam-bianca-bulgaru','2026-11-16T22:58:59','Colina WTA Ch','Clay','Polona Hercog','Miriam Bianca Bulgaru',1.11,4.71,1.3,3.65,1542.2,1348.9,3.0,'Colina WTA Ch, Clay, Polona Hercog, Miriam Bianca Bulgaru, 1.11, 4.71, 1.3, 3.65, 1542.2, 1348.9, 54.0, 38.0, 3.0, 66.03, 55.4');
 INSERT INTO "matches" VALUES('https://tennisinsight.com/match/260764116/2026-colina-wta-ch/r32/despina-papamichail-vs-laura-samson','2026-11-16T22:58:59','Colina WTA Ch','Clay','Despina Papamichail','Laura Samson',7.75,1.02,4.5,1.22,1395.0,1629.0,3.0,'Colina WTA Ch, Clay, Despina Papamichail, Laura Samson, 7.75, 1.02, 4.5, 1.22, 1395.0, 1629.0, 44.0, 62.0, 3.0, 51.11, 70.67');
+INSERT INTO "matches" VALUES('https://tennisinsight.com/match/260684108/2026-turin-atp-wtf/rr/flavio-cobolli-vs-frances-tiafoe','2026-11-17T16:10:42','Turin ATP WTF','Indoor Hard','Flavio Cobolli','Frances Tiafoe',-56.42,0.89,2.14,1.75,1797.2,1875.6,3.0,'Turin ATP WTF, Indoor Hard, Flavio Cobolli, Frances Tiafoe, -56.42, 0.89, 2.14, 1.75, 1797.2, 1875.6, 60.0, 66.0, 3.0, 41.94, 50.0');
+INSERT INTO "matches" VALUES('https://tennisinsight.com/match/260684107/2026-turin-atp-wtf/rr/carlos-alcaraz-vs-daniil-medvedev','2026-11-17T16:10:44','Turin ATP WTF','Indoor Hard','Carlos Alcaraz','Daniil Medvedev',1.41,2.5,1.26,4.1,2142.2,1960.6,3.0,'Turin ATP WTF, Indoor Hard, Carlos Alcaraz, Daniil Medvedev, 1.41, 2.5, 1.26, 4.1, 2142.2, 1960.6, 88.0, 70.0, 3.0, 74.58, 69.15');
 DELETE FROM "sqlite_sequence";
 INSERT INTO "sqlite_sequence" VALUES('bets',2);
 COMMIT;
