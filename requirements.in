@@ -1,0 +1,13 @@
+# Dépendances directes ; requirements.txt verrouille aussi les dépendances transitives.
+aiohttp
+beautifulsoup4
+numpy
+pandas
+scipy
+jaro-winkler
+aiolimiter
+lxml
+openpyxl
+python-dotenv
+pytest
+pytest-asyncio

@@ -19,10 +19,12 @@ class TestComparators(unittest.TestCase):
         match_vs[7] = "40.0"
         match_vs[42] = "0.0"
         match_vs[43] = "0.0"
+        match_vs[40] = "1800"
+        match_vs[41] = "1600"
         compare_players(match_vs)
         # Verify odds were populated
-        self.assertTrue(bool(match_vs[36]))
-        self.assertTrue(bool(match_vs[37]))
+        self.assertGreater(float(match_vs[36]), 1)
+        self.assertGreater(float(match_vs[37]), 1)
 
     def test_indice_comparator(self):
         indice_tab = np.zeros(25)

@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+from math import isnan
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from analysis.last_matchs import TennisDataParser
@@ -19,7 +20,7 @@ class TestTennisDataParser(unittest.TestCase):
         self.assertEqual(val, 75.5)
 
         val_na = TennisDataParser._extract_single_percentage("N/A")
-        self.assertEqual(val_na, 0.0)
+        self.assertTrue(isnan(val_na))
 
     def test_parse_win_percentages_empty(self):
         result = TennisDataParser.parse_win_percentages(None)
@@ -28,8 +29,36 @@ class TestTennisDataParser(unittest.TestCase):
     def test_parse_win_percentages_with_text(self):
         raw = "Header Matches 50% Matches 65% (12 months) 70% (since 2000) 60%"
         result = TennisDataParser.parse_win_percentages(DummySoup(raw))
-        self.assertIsInstance(result, list)
-        self.assertTrue(len(result) >= 2)
+        self.assertEqual(result, [50.0, 65.0, 70.0, 60.0])
+
+    def test_missing_windows_are_not_replaced_by_other_windows_or_zero(self):
+        result = TennisDataParser.parse_win_percentages(DummySoup("(since 2000) 60%"))
+        self.assertTrue(all(isnan(value) for value in result[:3]))
+        self.assertEqual(result[3], 60.0)
+        self.assertEqual(TennisDataParser._extract_single_percentage("0%"), 0.0)
+        for value in ("N/A", "", "101%", "-1%", "NaN", "inf"):
+            self.assertTrue(isnan(TennisDataParser._extract_single_percentage(value)))
+
+    def test_failed_stats_collection_cannot_generate_model_odds(self):
+        from analysis.last_matchs import TennisMatchAnalyzer
+        from analysis.compare_players import compare_players
+        from core.models import MatchAnalysisData, PlayerStats
+        from unittest.mock import MagicMock
+
+        percentages = TennisMatchAnalyzer(MagicMock()).extract_win_percentages(None, None)
+        match = MatchAnalysisData(
+            "test", player_a=PlayerStats(name="Alpha", ranking=1, elo=2000),
+            player_b=PlayerStats(name="Beta", ranking=50, elo=1700),
+        )
+        match.player_a.win_pct_1y = percentages[2]
+        match.player_a.win_pct_career_surface = percentages[5]
+        compare_players(match)
+        self.assertEqual(match.player_a.model_odds, 0)
+        self.assertEqual(match.player_b.model_odds, 0)
+
+    def test_missing_rankings_remain_invalid(self):
+        from core.tournament_extractor import parse_player_rankings
+        self.assertEqual(parse_player_rankings(BeautifulSoup("<div>Unknown</div>", "lxml")), [0, 0])
 
     def test_extract_player_ids_valid(self):
         html = (

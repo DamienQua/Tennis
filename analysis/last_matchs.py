@@ -95,7 +95,8 @@ class TennisMatchAnalyzer:
         )
         win_percentages = self.extract_win_percentages(act1, surf)
         match_stats = await self.match_statistics_processor.process_match_statistics(
-            player_id, match_id, tour_now, activity_data=act1
+            player_id, match_id, tour_now, activity_data=act1,
+            player_name=match.get_player(last_flag).name,
         )
         nb_matches = self.calculate_matches_last_month(today, act1)
 
@@ -119,10 +120,10 @@ class TennisMatchAnalyzer:
         self, data_act1: Optional[BeautifulSoup], data_surf: Optional[BeautifulSoup]
     ) -> List[float]:
         raw_all = self.stats_processor.calculate_win_percentages(data_act1)
-        all_percentages = (list(raw_all) + [0.0] * 4)[:4]
+        all_percentages = (list(raw_all) + [float("nan")] * 4)[:4]
         raw_surf = self.stats_processor.calculate_win_percentages(data_surf)
         surf_part = raw_surf[2:] if len(raw_surf) >= 3 else raw_surf
-        surface_percentages = (list(surf_part) + [0.0] * 2)[:2]
+        surface_percentages = (list(surf_part) + [float("nan")] * 2)[:2]
         return all_percentages + surface_percentages
 
     @staticmethod

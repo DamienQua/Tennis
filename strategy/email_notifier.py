@@ -8,6 +8,7 @@ import html
 import os
 import smtplib
 import socket
+import ssl
 from typing import Any, Dict, List, Optional
 from dotenv import dotenv_values
 
@@ -143,7 +144,7 @@ def _attach_excel(msg: MIMEMultipart, filepath: str) -> None:
 
 def _dispatch_smtp(cfg: Dict[str, str], msg: MIMEMultipart) -> None:
     with smtplib.SMTP(cfg["host"], int(cfg["port"]), timeout=15) as server:
-        server.starttls()
+        server.starttls(context=ssl.create_default_context())
         server.login(cfg["user"], cfg["password"])
         server.send_message(msg)
 
@@ -155,7 +156,7 @@ def send_daily_email(
     config: Optional[Dict[str, str]] = None,
 ) -> bool:
     """Construit et envoie le rapport quotidien par e-mail."""
-    cfg = config or _load_smtp_config()
+    cfg = config if config is not None else _load_smtp_config()
     if not _is_config_valid(cfg):
         print("Identifiants email non configurés (SMTP_USER/SMTP_PASSWORD). Envoi ignoré.")
         return False
@@ -172,6 +173,6 @@ def send_daily_email(
         _dispatch_smtp(cfg, msg)
         print(f"Email récapitulatif envoyé avec succès à {cfg['recipient']}")
         return True
-    except (smtplib.SMTPException, socket.error, OSError, TimeoutError) as err:
+    except (smtplib.SMTPException, socket.error, OSError, TimeoutError, ValueError) as err:
         print(f"Erreur lors de l'envoi de l'email : {err}")
         return False

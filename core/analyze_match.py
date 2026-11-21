@@ -24,6 +24,7 @@ from data_providers.elo_matcher import EloMatcher
 from data_providers.odds_match import odds_match, fetch_both_odds
 from strategy.alpha_strategy import evaluate_alpha_strategy
 from strategy.generate_match_xlsx import generate_match_xlsx
+from utils.http_client import request
 
 logger = logging.getLogger(__name__)
 ADMIN_URL = "https://tennisinsight.com/wp-admin/admin-ajax.php"
@@ -44,8 +45,8 @@ def clear_session_bets() -> None:
 async def _attempt_fetch(
     session: aiohttp.ClientSession, url: str, method: str, data: Any
 ) -> Optional[str]:
-    req = session.post(url, data=data) if method == "post" else session.get(url)
-    async with req as response:
+    kwargs = {"data": data} if method == "post" else {}
+    async with request(session, method, url, **kwargs) as response:
         if response.status == 200:
             text = await response.text()
             return text if text and text.strip() else None
@@ -172,10 +173,8 @@ async def _run_analysis_phases(
     await h2h_table(parsed["soup_overview"], match, session, ctx)
 
 
-def _evaluate_and_record_strategy(
-    elo_data: str, match: MatchAnalysisData, db: Optional[TennisDatabase]
-) -> None:
-    """Associe les cotes ELO, évalue Alpha 5+ et enregistre le pari dans SQLite."""
+def _populate_elo(elo_data: str, match: MatchAnalysisData) -> None:
+    """Charge les ELO avant le calcul des probabilités."""
     elo_a, elo_b = EloMatcher.find_elo_ratings(
         elo_data, match.player_a.name, match.player_b.name, match.surface
     )
@@ -184,6 +183,14 @@ def _evaluate_and_record_strategy(
     if elo_b:
         match.player_b.elo = float(elo_b)
 
+
+def _evaluate_and_record_strategy(
+    match: MatchAnalysisData, db: Optional[TennisDatabase]
+) -> None:
+    """Évalue et enregistre uniquement les analyses complètes avec marché ouvert."""
+    if not match.is_complete():
+        logger.info("Analyse incomplète, nouvelle tentative possible : %s", match.match_url)
+        return
     alpha_res = evaluate_alpha_strategy(match)
     print(f"  {alpha_res['summary']}")
 
@@ -221,14 +228,23 @@ async def analyze_match(
 
     match = MatchAnalysisData(match_url=match_url)
     _populate_metadata(match, tournaments, parsed["soup_main"], parsed["soup_overview"])
+    _populate_elo(elo_data, match)
 
     odds_future = asyncio.create_task(
         fetch_both_odds(session, match.player_a.name, match.player_b.name)
     )
-    await _run_analysis_phases(session, header, parsed, match)
-    compare_players(match)
-    await odds_match(match, session=session, odds_future=odds_future)
+    try:
+        await _run_analysis_phases(session, header, parsed, match)
+        compare_players(match)
+        await odds_match(match, session=session, odds_future=odds_future)
+    finally:
+        if not odds_future.done():
+            odds_future.cancel()
+        await asyncio.gather(odds_future, return_exceptions=True)
     compare_indice(match)
-    _evaluate_and_record_strategy(elo_data, match, db)
-    await asyncio.to_thread(generate_match_xlsx, match)
+    try:
+        await asyncio.to_thread(generate_match_xlsx, match)
+    except OSError:
+        logger.exception("Export du détail Excel impossible : %s", match.match_url)
+    _evaluate_and_record_strategy(match, db)
     return match

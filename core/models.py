@@ -1,7 +1,8 @@
 """Modèles de données typés pour l'analyse de matchs de tennis."""
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from math import isfinite
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -22,12 +23,12 @@ class PlayerStats:
 
     # Activité récente & fatigue
     matches_last_month: int = 0
-    tournament_minutes: int = 0
+    tournament_minutes: Optional[int] = None
 
     # Service & retour
-    first_serve_pct: float = 0.0
-    first_serve_pts_won: float = 0.0
-    break_points_saved_pct: float = 0.0
+    first_serve_pct: Optional[float] = None
+    first_serve_pts_won: Optional[float] = None
+    break_points_saved_pct: Optional[float] = None
 
     # Cotes & modèles
     model_odds: float = 0.0
@@ -76,6 +77,23 @@ class MatchAnalysisData:
     player_b: PlayerStats = field(default_factory=PlayerStats)
     h2h: H2HMetrics = field(default_factory=H2HMetrics)
     confidence: ConfidenceMetrics = field(default_factory=ConfidenceMetrics)
+    market_status: str = "unknown"
+    odds_observed_at: str = ""
+    scheduled_start: str = ""
+
+    def is_complete(self) -> bool:
+        """Une analyse sans prix vérifiable ou ELO doit pouvoir être réessayée."""
+        players = (self.player_a, self.player_b)
+        try:
+            return self.market_status == "prematch" and all(
+                bool(player.name.strip())
+                and all(isfinite(value) and value > 1.0 for value in (
+                    player.model_odds, player.book_odds, player.elo
+                ))
+                for player in players
+            )
+        except (AttributeError, TypeError, ValueError):
+            return False
 
     def get_player(self, index: int) -> PlayerStats:
         """Retourne player_a (0) ou player_b (1)."""
@@ -85,15 +103,16 @@ class MatchAnalysisData:
         """Formate la ligne de sortie compatible avec Matchs.txt."""
         pa, pb = self.player_a, self.player_b
         fmt = lambda val: f"{val}" if val else ""
+        fmt_odds = lambda val: f"{val:.2f}" if val else ""
         fields = [
             self.tournament,
             self.surface,
             pa.name,
             pb.name,
-            fmt(pa.model_odds),
-            fmt(pb.model_odds),
-            fmt(pa.book_odds),
-            fmt(pb.book_odds),
+            fmt_odds(pa.model_odds),
+            fmt_odds(pb.model_odds),
+            fmt_odds(pa.book_odds),
+            fmt_odds(pb.book_odds),
             fmt(pa.elo),
             fmt(pb.elo),
             f"{pa.win_pct_last_50}",

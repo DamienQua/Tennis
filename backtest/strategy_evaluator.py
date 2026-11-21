@@ -1,6 +1,7 @@
 """Évaluateur de stratégies de paris pour le backtesting (Confluence & Alpha 5+)."""
 
 from typing import Any, Dict, List, Optional
+from math import isfinite
 from strategy.alpha_strategy import evaluate_alpha_strategy
 
 
@@ -78,6 +79,11 @@ class StrategyEvaluator:
     @classmethod
     def evaluate_confluence(cls, *args) -> str:
         """Évalue le filtre de confluence historique."""
+        values = _parse_confluence_metrics(args)
+        if (not all(isfinite(value) for value in values)
+                or min(values[:4]) <= 1.0 or min(values[4:6]) <= 0
+                or any(value < 0 or value > 100 for value in values[6:])):
+            return "PAS OK"
         if cls._is_ok_j1(*args):
             return "OK J1"
         if cls._is_ok_j2(*args):

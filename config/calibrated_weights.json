@@ -1,32 +1,95 @@
 {
-  "hard": {
-    "rank": 2.49,
-    "form": 3.16,
-    "surface": 4.08,
-    "elo": 0.0613,
-    "trj": 0.9,
-    "samples": 12941,
-    "brier_before": 0.223,
-    "brier_after": 0.2269
+  "schema_version": 1,
+  "model_type": "logistic_difference",
+  "feature_names": [
+    "rank_difference",
+    "form_12m_difference",
+    "surface_career_difference",
+    "elo_difference"
+  ],
+  "description": "Heuristic baseline; not empirically calibrated or validated.",
+  "surfaces": {
+    "hard": {
+      "status": "baseline",
+      "weights": [
+        0.8,
+        0.8,
+        1.2,
+        1.0
+      ],
+      "training_samples": 10114,
+      "validation_samples": 2689,
+      "trained_through": "2025-11-16",
+      "validation_from": "2026-01-04",
+      "validated_through": "2026-11-08",
+      "validation_metrics": {
+        "baseline_brier": 0.21578015310689264,
+        "candidate_brier": 0.22276729167984877,
+        "baseline_log_loss": 0.6188986458252131,
+        "candidate_log_loss": 0.6373215157165142
+      },
+      "reason": "Candidate did not improve the later holdout",
+      "candidate_weights": [
+        0.40587010170154797,
+        0.13028365627902871,
+        0.1424613685614857,
+        0.2864851573675684
+      ]
+    },
+    "clay": {
+      "status": "baseline",
+      "weights": [
+        0.8,
+        0.8,
+        1.2,
+        1.0
+      ],
+      "training_samples": 4524,
+      "validation_samples": 1152,
+      "trained_through": "2025-07-26",
+      "validation_from": "2026-02-09",
+      "validated_through": "2026-07-26",
+      "validation_metrics": {
+        "baseline_brier": 0.21912824097177083,
+        "candidate_brier": 0.22681380392243872,
+        "baseline_log_loss": 0.628288071678509,
+        "candidate_log_loss": 0.6457711644588265
+      },
+      "reason": "Candidate did not improve the later holdout",
+      "candidate_weights": [
+        0.49328535876296076,
+        0.12464071364367776,
+        0.12205791112129397,
+        0.20708686603421506
+      ]
+    },
+    "grass": {
+      "status": "baseline",
+      "weights": [
+        0.8,
+        0.8,
+        1.2,
+        1.0
+      ],
+      "training_samples": 1910,
+      "validation_samples": 488,
+      "trained_through": "2025-07-13",
+      "validation_from": "2026-06-08",
+      "validated_through": "2026-07-12",
+      "validation_metrics": {
+        "baseline_brier": 0.22461334658380838,
+        "candidate_brier": 0.2292804740127591,
+        "baseline_log_loss": 0.6393100456691668,
+        "candidate_log_loss": 0.6510190811971261
+      },
+      "reason": "Candidate did not improve the later holdout",
+      "candidate_weights": [
+        0.4454488888037478,
+        0.15774051033434353,
+        0.15258913784884837,
+        0.12032168949187096
+      ]
+    }
   },
-  "clay": {
-    "rank": 2.87,
-    "form": 3.25,
-    "surface": 3.69,
-    "elo": 0.0442,
-    "trj": 0.9,
-    "samples": 5920,
-    "brier_before": 0.2219,
-    "brier_after": 0.2269
-  },
-  "grass": {
-    "rank": 2.75,
-    "form": 3.67,
-    "surface": 3.44,
-    "elo": 0.025,
-    "trj": 0.9,
-    "samples": 2725,
-    "brier_before": 0.2272,
-    "brier_after": 0.2305
-  }
+  "selection_policy": "Later holdout: Brier strictly lower, log loss no higher than baseline."
 }

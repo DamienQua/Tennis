@@ -1,6 +1,7 @@
 """Stratégie de détection Value Betting Alpha 5+ All-Court avec dimensionnement Kelly."""
 
 from types import SimpleNamespace
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Dict, Tuple
 from utils.helpers import get_arg
 
@@ -19,13 +20,14 @@ MAX_STAKE_PCT = 3.0
 
 def _safe_float(val: Any) -> float:
     try:
-        return float(str(val).replace(",", ".").strip())
+        value = float(str(val).replace(",", ".").strip())
+        return value if isfinite(value) else 0.0
     except (ValueError, TypeError, AttributeError):
         return 0.0
 
 
 def _calculate_probabilities(model_1: float, model_2: float) -> Tuple[float, float]:
-    if model_1 <= 1.01 or model_2 <= 1.01:
+    if model_1 <= 1.0 or model_2 <= 1.0:
         return 0.0, 0.0
     p1_raw = MODEL_MARGIN / model_1
     p2_raw = MODEL_MARGIN / model_2
@@ -41,7 +43,7 @@ def _calc_raw_ev(prob: float, book_odds: float) -> float:
 
 def calculate_kelly_stake(prob: float, book_odds: float) -> float:
     """Calcule la mise conseillée en % de bankroll via Kelly fractionné."""
-    if book_odds <= 1.0 or prob <= 0.0:
+    if not isfinite(book_odds) or not isfinite(prob) or book_odds <= 1.0 or not 0.0 < prob <= 1.0:
         return 0.0
     net_odds = book_odds - 1.0
     full_kelly = (prob * net_odds - (1.0 - prob)) / net_odds
@@ -137,10 +139,17 @@ def _extract_players_adapter(args: tuple, kwargs: dict) -> Tuple[Any, Any]:
 def evaluate_alpha_strategy(*args, **kwargs) -> Dict[str, Any]:
     """Évalue la stratégie Alpha 5+ sur MatchAnalysisData ou paramètres bruts."""
     pa, pb = _extract_players_adapter(args, kwargs)
+    values = (pa.model_odds, pb.model_odds, pa.book_odds, pb.book_odds, pa.elo, pb.elo)
     data_valid = (
-        min(pa.model_odds, pb.model_odds, pa.book_odds, pb.book_odds) > 1.01
-        and min(pa.elo, pb.elo) > 0
+        all(isinstance(value, (int, float)) and isfinite(value) for value in values)
+        and min(values[:4]) > 1.0
+        and min(values[4:]) > 0
     )
+    if not data_valid:
+        base = _build_no_bet_result(False)
+        base.update(ev_j1_str="-", ev_j2_str="-", elo_diff_j1_str="-", elo_diff_j2_str="-")
+        base["summary"] = format_alpha_summary(base)
+        return base
     probs = _calculate_probabilities(pa.model_odds, pb.model_odds)
     diffs = (pa.elo - pb.elo, pb.elo - pa.elo)
     cand_1 = _check_candidate(probs[0], pa.book_odds, diffs[0])

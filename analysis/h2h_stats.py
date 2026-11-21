@@ -4,6 +4,7 @@ from datetime import datetime
 import re
 from typing import Tuple
 from core.models import H2HMetrics
+from utils.player_identity import canonical_name
 
 
 class DateUtils:
@@ -22,7 +23,7 @@ class DateUtils:
         """Vérifie si l'horodatage date de moins d'un an."""
         today = datetime.now().timestamp()
         year_sec = 365.25 * 24 * 3600
-        return (today - date_ms) <= year_sec
+        return 0 <= (today - date_ms) <= year_sec
 
 
 class PlayerH2H:
@@ -56,12 +57,39 @@ class H2HStats:
 
     def update_stats(
         self, winner: str, date_ms: float, surface: str, score: str, current_surface: str
-    ) -> None:
+    ) -> bool:
         """Met à jour les compteurs suite à une rencontre historique."""
-        if winner and winner in self.player_a:
+        winner_index = self.winner_index(winner)
+        if winner_index is None:
+            return False
+        if winner_index == 0:
             self._record_win(self.p_a, date_ms, surface, score, current_surface, loser_idx=0)
         else:
             self._record_win(self.p_b, date_ms, surface, score, current_surface, loser_idx=1)
+        return True
+
+    def winner_index(self, winner: str):
+        """Résout une identité complète ou un nom court unique parmi les joueurs."""
+        name = canonical_name(winner)
+        if not name:
+            return None
+        players = [canonical_name(self.player_a), canonical_name(self.player_b)]
+        matches = [index for index, player in enumerate(players) if name == player]
+        if not matches and " " not in name:
+            matches = [
+                index for index, player in enumerate(players)
+                if player and name == player.split()[-1]
+            ]
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def same_surface(first: str, second: str) -> bool:
+        """Conserve la distinction dur extérieur / dur intérieur de la source."""
+        def normalized(value: str) -> str:
+            value = canonical_name(value).replace(" court", "")
+            return value.removeprefix("outdoor ")
+
+        return bool(first and second) and normalized(first) == normalized(second)
 
     def _record_win(
         self,
@@ -76,7 +104,7 @@ class H2HStats:
         if DateUtils.is_within_last_year(date_ms):
             player_stats.wins_year += 1
             self.h2h_y += 1
-        if current_surface and current_surface in surface:
+        if self.same_surface(current_surface, surface):
             player_stats.wins_surface += 1
         self._update_game_stats(score, loser_idx)
 

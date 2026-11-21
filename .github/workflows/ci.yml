@@ -1,0 +1,37 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    paths:
+      - "**.py"
+      - "requirements*"
+      - "pytest.ini"
+      - "config/**"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Installer les dépendances verrouillées
+        run: python -m pip install -r requirements.txt
+      - name: Vérifier les dépendances
+        run: python -m pip check
+      - name: Vérifier la syntaxe
+        run: python -m compileall -q main.py analysis backtest core data_providers strategy utils tests
+      - name: Tests autonomes sans identifiants ni archives privées
+        run: python -m pytest -q

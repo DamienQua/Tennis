@@ -70,13 +70,18 @@ class BacktestEngine:
             "surface_b": get_arg(args, 9, kwargs.get("surface_b", 0.0)),
             "year": get_arg(args, 10, kwargs.get("year", 2023)),
             "gender": get_arg(args, 11, kwargs.get("gender", "atp")),
+            "match_date": kwargs.get("match_date"),
         }
 
     @staticmethod
     def _extract_closing_odds(hist: dict) -> Tuple[float, float]:
-        m_a = float(hist["odds_a"].get("b365") or hist["odds_a"].get("ps") or 0.0)
-        m_b = float(hist["odds_b"].get("b365") or hist["odds_b"].get("ps") or 0.0)
-        return m_a, m_b
+        from math import isfinite
+        for book in ("b365", "ps"):
+            m_a = float(hist["odds_a"].get(book) or 0.0)
+            m_b = float(hist["odds_b"].get(book) or 0.0)
+            if all(isfinite(odd) and odd > 1 for odd in (m_a, m_b)):
+                return m_a, m_b
+        return 0.0, 0.0
 
     def _evaluate_strategy(
         self, params: dict, m_a: float, m_b: float, winner: str
@@ -151,7 +156,8 @@ class BacktestEngine:
         """Injecte les cotes historiques, évalue la stratégie et enregistre le résultat."""
         params = self._parse_match_params(args, kwargs)
         hist = self.odds_provider.get_match_odds(
-            params["player_a"], params["player_b"], params["year"], params["gender"]
+            params["player_a"], params["player_b"], params["year"], params["gender"],
+            match_date=params["match_date"], tournament=params["tournament"],
         )
         if not hist:
             return None

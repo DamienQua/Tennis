@@ -56,12 +56,12 @@ class TournamentExtractor:
     def parse_player_rankings(data: BeautifulSoup) -> List[int]:
         """Extrait les classements ATP/WTA des deux joueurs."""
         rankings: List[int] = []
-        clean_txt = data.text.replace("Unknown", "1000")
+        clean_txt = data.get_text() if data else ""
         for idx in range(2):
             try:
                 ranking = int(clean_txt.split("(HI")[idx].split("\n")[-1].strip())
             except (ValueError, IndexError, AttributeError):
-                ranking = 1000
+                ranking = 0
             rankings.append(ranking)
         return rankings
 

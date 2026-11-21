@@ -5,6 +5,7 @@ import time
 from typing import Dict, Optional
 import aiohttp
 from bs4 import BeautifulSoup
+from utils.http_client import request
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -30,13 +31,13 @@ class EloFetcher:
 
         headers = {"User-Agent": user_agent}
         if session is not None:
-            async with session.get(url, headers=headers) as response:
+            async with request(session, "GET", url, headers=headers) as response:
                 response.raise_for_status()
                 content = await response.text()
         else:
             timeout = aiohttp.ClientTimeout(total=15.0)
             async with aiohttp.ClientSession(timeout=timeout) as temp_session:
-                async with temp_session.get(url, headers=headers) as response:
+                async with request(temp_session, "GET", url, headers=headers) as response:
                     response.raise_for_status()
                     content = await response.text()
 

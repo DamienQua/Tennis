@@ -20,21 +20,24 @@ from core.models import MatchAnalysisData
 from data_providers.elo_finder import elo_table
 from strategy.email_notifier import send_daily_email
 from strategy.result_settler import update_pending_results
+from utils.http_client import request, set_rate_limiter
 
-os.environ.pop("SSLKEYLOGFILE", None)
-os.makedirs("logs", exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        RotatingFileHandler(
-            "logs/tennis_ai.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8"
-        ),
-    ],
-)
 logger = logging.getLogger(__name__)
+
+
+def configure_logging() -> None:
+    """Initialisation explicite, sans créer de fichiers lors d'un import."""
+    os.makedirs("logs", exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            RotatingFileHandler(
+                "logs/tennis_ai.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+            ),
+        ],
+    )
 
 
 class SessionConfig(NamedTuple):
@@ -71,10 +74,9 @@ class MatchProcessor:
     async def fetch_and_analyze(
         self, match_url: str, tournaments: Sequence[str], elo_data: str
     ) -> Optional[MatchAnalysisData]:
-        async with self.rate_limit:
-            return await analyze_match(
-                self.session, self.header, match_url, tournaments, elo_data, db=self.db
-            )
+        return await analyze_match(
+            self.session, self.header, match_url, tournaments, elo_data, db=self.db
+        )
 
     @staticmethod
     def format_result(match_info: str, match_url: str) -> str:
@@ -188,7 +190,7 @@ async def login(session: aiohttp.ClientSession) -> None:
             "Les identifiants TENNISINSIGHT_LOGIN et TENNISINSIGHT_PASSWORD "
             "doivent être définis dans l'environnement ou le fichier .env."
         )
-    async with session.post(
+    async with request(session, "POST",
         "https://tennisinsight.com/wp-login.php",
         data={"log": username, "pwd": password},
     ) as resp:
@@ -197,7 +199,8 @@ async def login(session: aiohttp.ClientSession) -> None:
 
 async def fetch_match_previews(session: aiohttp.ClientSession) -> Tuple[np.ndarray, List[str]]:
     """Récupère les tournois actifs et les liens des matchs du jour."""
-    async with session.get("https://tennisinsight.com/match-previews/") as resp:
+    async with request(session, "GET", "https://tennisinsight.com/match-previews/") as resp:
+        resp.raise_for_status()
         html = await resp.text()
     soup = BeautifulSoup(html, "lxml")
     tournaments = np.array([
@@ -225,6 +228,8 @@ async def _process_single_match(
     match_url: str, tournaments: Sequence[str], elo_data: str, ctx: BatchContext
 ) -> Optional[str]:
     async with ctx.semaphore:
+        if not ctx.processor.should_process(match_url):
+            return None
         match_data = await ctx.processor.process(match_url, tournaments, elo_data)
         if match_data:
             line = f"{match_data.to_summary_line()}, {match_url}"
@@ -232,7 +237,10 @@ async def _process_single_match(
                 ctx.results.append(line)
                 if ctx.db:
                     ctx.db.save_match(match_data)
-        await asyncio.sleep(0.5)
+                if match_data.is_complete():
+                    ctx.processor.already_processed.add(match_url)
+        elif ctx.db:
+            ctx.db.record_retry(match_url, "Collecte ou analyse sans résultat ; voir les logs")
         return match_data.to_summary_line() if match_data else None
 
 
@@ -248,6 +256,7 @@ async def process_matches(
 ) -> str:
     """Traite la liste des matchs en parallèle sous contrôle de débit."""
     clear_session_bets()
+    set_rate_limiter(session, session_config.rate_limit)
     if os.path.exists("Matchs.txt"):
         os.remove("Matchs.txt")
 
@@ -268,7 +277,7 @@ async def process_matches(
         _process_single_match(
             url, tournaments, determine_elo_data(url, atp_elo, wta_elo), ctx
         )
-        for url in match_urls
+        for url in dict.fromkeys(url.strip() for url in match_urls)
     ]
     await asyncio.gather(*tasks)
 
@@ -283,10 +292,10 @@ async def process_matches(
     return ("\n".join(ctx.results) + "\n") if ctx.results else ""
 
 
-def _notify_daily_results(matchs_str: str, excel_path: str) -> None:
+def _notify_daily_results(matchs_str: str, excel_path: str) -> bool:
     total_matches = len([line for line in (matchs_str or "").split("\n") if line.strip()])
     bets = get_session_bets()
-    send_daily_email(bets, total_matches=total_matches, filepath=excel_path)
+    return send_daily_email(bets, total_matches=total_matches, filepath=excel_path)
 
 
 def _parse_cli_args() -> argparse.Namespace:
@@ -296,45 +305,52 @@ def _parse_cli_args() -> argparse.Namespace:
         action="store_true",
         help="Vérifie et met à jour les résultats des paris en attente",
     )
+    parser.add_argument("--no-email", action="store_true", help="Désactive explicitement l'envoi email")
     return parser.parse_args()
 
 
 async def main() -> None:
     """Point d'entrée principal du pipeline."""
     args = _parse_cli_args()
+    configure_logging()
     session_config = create_session_config()
     db = TennisDatabase()
 
-    async with aiohttp.ClientSession(
-        connector=session_config.connector,
-        headers=session_config.header,
-        timeout=session_config.timeout,
-    ) as session:
-        await login(session)
+    try:
+        async with aiohttp.ClientSession(
+            connector=session_config.connector,
+            headers=session_config.header,
+            timeout=session_config.timeout,
+        ) as session:
+            set_rate_limiter(session, session_config.rate_limit)
+            await login(session)
 
-        if args.update_results:
-            await update_pending_results(session, db)
-            return
+            if args.update_results:
+                await update_pending_results(session, db)
+                return
 
-        atp_elo, wta_elo = await asyncio.gather(
-            elo_table("ATP", session=session),
-            elo_table("WTA", session=session),
-        )
-        tournaments, match_urls = await fetch_match_previews(session)
-        matchs = await process_matches(
-            session=session,
-            session_config=session_config,
-            tournaments=tournaments,
-            match_urls=match_urls,
-            atp_elo=atp_elo,
-            wta_elo=wta_elo,
-            db=db,
-            max_parallel_matches=5,
-        )
+            atp_elo, wta_elo = await asyncio.gather(
+                elo_table("ATP", session=session),
+                elo_table("WTA", session=session),
+            )
+            tournaments, match_urls = await fetch_match_previews(session)
+            matchs = await process_matches(
+                session=session,
+                session_config=session_config,
+                tournaments=tournaments,
+                match_urls=match_urls,
+                atp_elo=atp_elo,
+                wta_elo=wta_elo,
+                db=db,
+                max_parallel_matches=5,
+            )
+    finally:
+        db.export_sql_dump()
 
     excel_path = db.export_bets_to_excel()
     print(matchs)
-    _notify_daily_results(matchs, excel_path=excel_path)
+    if not args.no_email and not _notify_daily_results(matchs, excel_path=excel_path):
+        raise RuntimeError("Notification email échouée ; les analyses sont sauvegardées dans SQLite et le dump SQL")
 
 
 if __name__ == "__main__":

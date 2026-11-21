@@ -19,13 +19,16 @@ class MatchStatisticsProcessor:
         match_id: str,
         tour_now: str,
         activity_data: Optional[BeautifulSoup] = None,
-    ) -> Tuple[int, float, float, float]:
+        player_name: Optional[str] = None,
+    ) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float]]:
         """Récupère en parallèle les stats des matchs du tournoi en cours."""
         data = (
             activity_data
             if activity_data is not None
             else await self.data_fetcher.fetch_player_activity(player_id, match_id, 1)
         )
+        if not data or not data.find(id="activity-table"):
+            return None, None, None, None
         matches_list = data.find_all(class_="activity-clickthroughs no-link") if data else []
 
         valid_indices: List[int] = []
@@ -35,13 +38,13 @@ class MatchStatisticsProcessor:
             valid_indices.append(idx)
 
         if not valid_indices:
-            return 0, 0.0, 0.0, 0.0
+            return 0, None, None, None
 
         results = await asyncio.gather(
-            *(self.get_match_statistics(matches_list, idx) for idx in valid_indices)
+            *(self.get_match_statistics(matches_list, idx, player_name) for idx in valid_indices)
         )
 
-        min_tour, per_first, pts_first, per_bp = 0, 0.0, 0.0, 0.0
+        min_tour, per_first, pts_first, per_bp = 0, None, None, None
         for m_i, new_stats in zip(valid_indices, results):
             min_tour, per_first, pts_first, per_bp = self.update_statistics(
                 new_stats, (min_tour, per_first, pts_first, per_bp), m_i, data
@@ -50,17 +53,17 @@ class MatchStatisticsProcessor:
 
     @staticmethod
     def update_statistics(
-        new_stats: Optional[Tuple[int, float, float, float]],
-        current_stats: Tuple[int, float, float, float],
+        new_stats: Optional[Tuple[Optional[int], Optional[float], Optional[float], Optional[float]]],
+        current_stats: Tuple[Optional[int], Optional[float], Optional[float], Optional[float]],
         m_i: int,
         data: Optional[BeautifulSoup],
-    ) -> Tuple[int, float, float, float]:
-        """Cumule les minutes et conserve les stats de service du dernier match."""
+    ) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[float]]:
+        """Le total exige toutes les durées ; le service décrit le dernier match."""
         min_tour, per_first, pts_first, per_bp = current_stats
-        if new_stats:
-            min_tour += new_stats[0]
-            if m_i == 0 and data and "Qualifying" not in data.text:
-                per_first, pts_first, per_bp = new_stats[1:]
+        duration = new_stats[0] if new_stats else None
+        min_tour = min_tour + duration if min_tour is not None and duration is not None else None
+        if m_i == 0:
+            per_first, pts_first, per_bp = new_stats[1:] if new_stats else (None, None, None)
         return min_tour, per_first, pts_first, per_bp
 
     @staticmethod
@@ -74,12 +77,12 @@ class MatchStatisticsProcessor:
         return clean_tour in href or (bool(tokens) and all(tok in href for tok in tokens[:2]))
 
     async def get_match_statistics(
-        self, matches_list: List[Any], m_i: int
-    ) -> Optional[Tuple[int, float, float, float]]:
+        self, matches_list: List[Any], m_i: int, player_name: Optional[str] = None
+    ) -> Optional[Tuple[Optional[int], Optional[float], Optional[float], Optional[float]]]:
         """Récupère les statistiques d'un match individuel de manière sécurisée."""
         try:
             return await self.stats_processor.process_match_statistics(
-                self.data_fetcher, matches_list, m_i
+                self.data_fetcher, matches_list, m_i, player_name
             )
         except (
             aiohttp.ClientError,

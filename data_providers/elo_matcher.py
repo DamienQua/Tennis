@@ -1,66 +1,90 @@
-"""Extraction et appariement des classements ELO par surface."""
+"""Extraction des trois ELO de surface et index réutilisable par table."""
 
-from itertools import takewhile
-from typing import List, Tuple
-import jaro
-from core.player_extractor import PlayerExtractor
+from functools import lru_cache
+import math
+import re
+from types import MappingProxyType
+from typing import List, Mapping, Optional, Tuple
+
+from utils.player_identity import canonical_name, names_match
+
+Ratings = Tuple[str, str, str]
+
+
+def surface_index(surface: str) -> Optional[int]:
+    """Retourne la colonne hard/clay/grass, sans inventer une surface inconnue."""
+    words = set(re.findall(r"[a-z]+", (surface or "").casefold()))
+    indexes = [index for index, name in enumerate(("hard", "clay", "grass")) if name in words]
+    return indexes[0] if len(indexes) == 1 else None
+
+
+def _parse_line(player_line: str) -> Optional[Tuple[str, Ratings]]:
+    parts = player_line.strip().rsplit(maxsplit=3)
+    if len(parts) != 4 or not canonical_name(parts[0]):
+        return None
+    ratings = []
+    for value in parts[1:]:
+        if value in ("-", "—", "N/A"):
+            ratings.append("")
+            continue
+        try:
+            number = float(value)
+        except ValueError:
+            return None
+        if not math.isfinite(number) or number <= 0:
+            return None
+        ratings.append(value)
+    return parts[0], tuple(ratings)
+
+
+@lru_cache(maxsize=8)
+def get_elo_index(elo_data: str) -> Mapping[str, Optional[Ratings]]:
+    """Index immuable mis en cache par contenu ; les identités ambiguës sont refusées."""
+    indexed = {}
+    for line in elo_data.splitlines():
+        parsed = _parse_line(line)
+        if parsed is None:
+            continue
+        player, ratings = parsed
+        key = canonical_name(player)
+        if key in indexed and indexed[key] != ratings:
+            indexed[key] = None
+        else:
+            indexed[key] = ratings
+    return MappingProxyType(indexed)
 
 
 class EloMatcher:
-    """Recherche les notes ELO des joueurs dans les tables Tennis Abstract."""
+    """Recherche exacte après normalisation des noms et alias explicites."""
 
     @classmethod
     def get_player_elo(cls, player_line: str, match_player_name: str, surface: str) -> str:
-        """Vérifie la correspondance du nom et extrait l'ELO de la surface."""
-        words = player_line.split(" ")
-        is_num = lambda x: x.isdigit() or x.replace(".", "", 1).isdigit()
-        player_vs = " ".join(takewhile(lambda x: not is_num(x), words))
-        if not player_vs:
+        parsed = _parse_line(player_line)
+        index = surface_index(surface)
+        if parsed is None or index is None or not names_match(parsed[0], match_player_name):
             return ""
-
-        # Vérification stricte sur le nom de famille pour éviter les homonymes
-        if player_vs.split()[-1].lower() != match_player_name.split()[-1].lower():
-            return ""
-
-        alias_name = PlayerExtractor.PLAYER_ALIASES.get(match_player_name, match_player_name)
-        sim_orig = jaro.jaro_winkler_metric(match_player_name, player_vs)
-        sim_alias = jaro.jaro_winkler_metric(alias_name, player_vs)
-        if sim_orig >= 0.95 or sim_alias >= 0.95:
-            return cls.extract_elo_rating(player_line, player_vs, surface)
-        return ""
+        return parsed[1][index]
 
     @classmethod
-    def _find_rating_for_player(
-        cls, lines: List[str], player_name: str, surface: str
-    ) -> str:
-        for line in lines:
-            rating = cls.get_player_elo(line, player_name, surface)
-            if rating:
-                return rating
-        return ""
+    def _find_rating_for_player(cls, lines: List[str], player_name: str, surface: str) -> str:
+        return cls.find_elo_ratings("\n".join(lines), player_name, "", surface)[0]
 
     @classmethod
     def find_elo_ratings(
         cls, elo_data: str, player_a_name: str, player_b_name: str, surface: str
     ) -> Tuple[str, str]:
-        """Retourne le couple (elo_a, elo_b) pour la surface demandée."""
-        lines = elo_data.split("\n")
-        elo_a = cls._find_rating_for_player(lines, player_a_name, surface)
-        elo_b = cls._find_rating_for_player(lines, player_b_name, surface)
-        return elo_a, elo_b
+        index = surface_index(surface)
+        if index is None:
+            return "", ""
+        table = get_elo_index(elo_data)
+
+        def rating(name: str) -> str:
+            values = table.get(canonical_name(name))
+            return values[index] if values else ""
+
+        return rating(player_a_name), rating(player_b_name)
 
     @staticmethod
     def extract_elo_rating(player_line: str, player_name: str, surface: str) -> str:
-        """Extrait la valeur numérique ELO correspondant à la surface."""
-        tokens = player_line.replace("-", " ").split()
-        if not tokens:
-            return ""
-        if "Hard" not in surface and surface != "Clay":
-            return tokens[-2] if len(tokens) >= 2 else ""
-        offset = 1 if "Hard" in surface else 2
-        base_idx = player_name.replace("-", " ").count(" ") + offset
-        for idx in range(base_idx, len(tokens)):
-            candidate = tokens[idx]
-            if candidate.replace(".", "", 1).isdigit():
-                return candidate
-        return ""
+        """Préserve l'API de lecture d'une ligne, sans décaler les colonnes manquantes."""
+        return EloMatcher.get_player_elo(player_line, player_name, surface)

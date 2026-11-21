@@ -107,7 +107,7 @@ def generate_match_xlsx(match_or_vec: Any) -> str:
 
 
 def _calculate_win_percentage(odds_value: float) -> float:
-    return round(90.0 / odds_value, 2) if odds_value > 0 else 0.0
+    return round(100.0 / odds_value, 2) if odds_value > 1 else 0.0
 
 
 def _prepare_match_data(
@@ -126,7 +126,7 @@ def _prepare_match_data(
         ["Ratio V/D carrière", h2h.all_time[0], h2h.all_time[1]],
         ["Ratio V/D 1 an", h2h.last_year[0], h2h.last_year[1]],
         ["Ratio V/D surface", h2h.surface[0], h2h.surface[1]],
-        ["% Sets gagnés", h2h.games[0], h2h.games[1]],
+        ["% Jeux gagnés en confrontations directes", h2h.games[0], h2h.games[1]],
         ["", "", ""],
         ["% Victoires 1 an", pa.win_pct_1y, pb.win_pct_1y],
         ["% Victoires 1 an surface", pa.win_pct_1y_surface, pb.win_pct_1y_surface],
@@ -145,8 +145,8 @@ def _prepare_match_data(
             _calculate_win_percentage(pb.model_odds),
         ],
         ["", "", ""],
-        ["Côte estimée", pa.model_odds or "", pb.model_odds or ""],
-        ["Cote Bookmaker", pa.book_odds or "", pb.book_odds or ""],
+        ["Côte estimée", round(pa.model_odds, 2) if pa.model_odds else "", round(pb.model_odds, 2) if pb.model_odds else ""],
+        ["Cote Bookmaker", round(pa.book_odds, 2) if pa.book_odds else "", round(pb.book_odds, 2) if pb.book_odds else ""],
         ["Classement ELO", pa.elo or "", pb.elo or ""],
         ["", "", ""],
         ["STRATÉGIE ALPHA 5+", alpha["signal_j1"], alpha["signal_j2"]],
@@ -184,6 +184,9 @@ def _apply_strategy_styling(sheet) -> None:
         min_row=1, max_row=sheet.max_row, min_col=1, max_col=sheet.max_column
     ):
         header = str(row[0].value or "")
+        if header in {"Côte estimée", "Cote Bookmaker"}:
+            for cell in row[1:]:
+                cell.number_format = "0.00"
         if "STRATÉGIE ALPHA 5+" in header:
             row[0].font = bold_font
             for cell in row[1:]:

@@ -1,11 +1,13 @@
 """Backtester historique chronologiquement pur (zéro look-ahead bias)."""
 
 import os
+from math import isfinite
 from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
-from backtest.fast_elo_matcher import FastEloMatcher
-from backtest.point_in_time_stats import PointInTimeStats
+from analysis.probability_model import build_features, load_model, model_odds
+from backtest.point_in_time_stats import PointInTimeStats, completed_matches
 from backtest.strategy_evaluator import StrategyEvaluator
+from backtest.historical_odds import HistoricalOddsProvider
 
 
 class PointInTimeBacktester:
@@ -17,73 +19,72 @@ class PointInTimeBacktester:
         evaluator: Optional[StrategyEvaluator] = None,
         output_dir: str = "backtest/results",
         strategy_mode: str = "alpha_5_plus",
+        model_path: Optional[str] = None,
     ) -> None:
         self.data_dir = data_dir
         self.evaluator = evaluator or StrategyEvaluator()
         self.output_dir = output_dir
         self.strategy_mode = strategy_mode
+        self.model = load_model(model_path)
         os.makedirs(self.output_dir, exist_ok=True)
         self.records: List[Dict[str, Any]] = []
 
     def _load_historical_dataset(self, gender: str) -> pd.DataFrame:
         dfs = []
-        for year in (2022, 2023, 2024, 2025, 2026):
-            filepath = os.path.join(self.data_dir, f"{gender}_{year}.xlsx")
-            if os.path.exists(filepath):
-                dfs.append(pd.read_excel(filepath))
+        from pathlib import Path
+        for filepath in sorted(Path(self.data_dir).glob(f"{gender.lower()}_[0-9][0-9][0-9][0-9].xlsx")):
+            dfs.append(pd.read_excel(filepath))
         if not dfs:
             return pd.DataFrame()
         combined = pd.concat(dfs, ignore_index=True)
-        combined["Date"] = pd.to_datetime(combined["Date"])
-        combined.sort_values("Date", inplace=True)
-        combined.reset_index(drop=True, inplace=True)
-        return combined
+        return completed_matches(combined)
 
     @staticmethod
-    def _calculate_score_a(
-        surf_a: float,
-        surf_b: float,
-        rank_a: float,
-        rank_b: float,
-        form_a: float,
-        form_b: float,
-    ) -> float:
-        diff_surf = (surf_a - surf_b) * 0.4
-        diff_form = (form_a - form_b) * 0.3
-        r_a = max(1.0, rank_a if rank_a > 0 else 200.0)
-        r_b = max(1.0, rank_b if rank_b > 0 else 200.0)
-        diff_rank = (r_b - r_a) / max(r_a, r_b) * 30.0
-        score_a = 50.0 + diff_surf + diff_form + diff_rank
-        return max(5.0, min(95.0, score_a))
-
-    @classmethod
     def _estimate_model_odds(
-        cls,
         surf_a: float,
         surf_b: float,
         rank_a: float,
         rank_b: float,
         form_a: float,
         form_b: float,
+        elo_a: float,
+        elo_b: float,
+        surface: str = "Hard",
+        model: Optional[dict] = None,
+        as_of: Any = None,
     ) -> Tuple[float, float]:
-        score_a = cls._calculate_score_a(surf_a, surf_b, rank_a, rank_b, form_a, form_b)
-        return round(90.0 / score_a, 2), round(90.0 / (100.0 - score_a), 2)
+        features = build_features(rank_a, rank_b, form_a, form_b, surf_a, surf_b, elo_a, elo_b)
+        return model_odds(features, surface, model, as_of)
 
     def run_backtest_for_year(
-        self, year: int, gender: str, elo_data: str = ""
+        self, year: int, gender: str, elo_data: str = "", *,
+        tournament: Optional[str] = None, month: Optional[int] = None,
+        report_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Exécute le backtest point-in-time sur une saison complète."""
+        if elo_data:
+            raise ValueError("Historical backtests reject undated external ELO data")
+        gender = gender.lower()
+        if gender not in {"atp", "wta"}:
+            raise ValueError("Circuit must be atp or wta")
+        self.records.clear()
+        self.evaluator.bets.clear()
         combined_df = self._load_historical_dataset(gender)
         filepath = os.path.join(self.data_dir, f"{gender}_{year}.xlsx")
         if combined_df.empty or not os.path.exists(filepath):
             return {"error": "Dataset empty or missing"}
 
         stats_engine = PointInTimeStats(combined_df)
-        fallback_elo = FastEloMatcher(elo_data) if elo_data else None
 
         target_raw = pd.read_excel(filepath)
-        target_raw["Date"] = pd.to_datetime(target_raw["Date"])
-        target_df = target_raw[target_raw["Comment"] == "Completed"].sort_values("Date")
+        target_df = completed_matches(target_raw)
+        target_df = target_df[target_df["Date"].dt.year == year]
+        if tournament is not None:
+            target_df = target_df[target_df["Tournament"].astype(str).str.casefold() == tournament.strip().casefold()]
+        if month is not None:
+            target_df = target_df[target_df["Date"].dt.month == month]
+        if target_df.empty:
+            return {"error": "No local matches for the requested year, tournament or month"}
 
         print(
             f"Running Point-in-Time backtest ({self.strategy_mode}) for "
@@ -91,10 +92,13 @@ class PointInTimeBacktester:
         )
 
         for _, row in target_df.iterrows():
-            self._process_single_row(row, stats_engine, fallback_elo)
+            self._process_single_row(row, stats_engine)
 
         summary = self.evaluator.get_summary()
-        filename = f"point_in_time_{gender}_{year}_{self.strategy_mode}_backtest.xlsx"
+        eligible = sum(record["model_w"] > 1 and record["model_l"] > 1 for record in self.records)
+        summary.update(total_matches=len(self.records), model_eligible=eligible,
+                       skipped_missing_features=len(self.records) - eligible)
+        filename = report_name or f"point_in_time_{gender}_{year}_{self.strategy_mode}_backtest.xlsx"
         self._export_results(filename, summary)
         return summary
 
@@ -106,8 +110,10 @@ class PointInTimeBacktester:
             val = row.get(col)
             if pd.notna(val) and val:
                 try:
-                    return float(val)
-                except ValueError:
+                    parsed = float(val)
+                    if isfinite(parsed) and parsed > 0:
+                        return parsed
+                except (ValueError, TypeError):
                     pass
         return 0.0
 
@@ -115,7 +121,6 @@ class PointInTimeBacktester:
         self,
         row: pd.Series,
         stats_engine: PointInTimeStats,
-        fallback_elo: Optional[FastEloMatcher],
     ) -> dict:
         p_w, p_l = str(row["Winner"]), str(row["Loser"])
         match_date = pd.to_datetime(row["Date"])
@@ -127,9 +132,9 @@ class PointInTimeBacktester:
         # Priorité à l'ELO historique glissant (zéro look-ahead bias)
         elo_w = stats_engine.get_player_elo_before(p_w, match_date, surface)
         elo_l = stats_engine.get_player_elo_before(p_l, match_date, surface)
-        if elo_w == 1500.0 and elo_l == 1500.0 and fallback_elo is not None:
-            elo_w = fallback_elo.get_elo(p_w, surface)
-            elo_l = fallback_elo.get_elo(p_l, surface)
+        book_w, book_l = HistoricalOddsProvider._extract_market_odds(row, "PS")
+        if not book_w:
+            book_w, book_l = HistoricalOddsProvider._extract_market_odds(row, "B365")
 
         return {
             "p_w": p_w,
@@ -143,8 +148,8 @@ class PointInTimeBacktester:
             "form_l": form_l,
             "rank_w": self._get_val(row, "WRank"),
             "rank_l": self._get_val(row, "LRank"),
-            "book_w": self._get_val(row, "PSW", "B365W"),
-            "book_l": self._get_val(row, "PSL", "B365L"),
+            "book_w": book_w,
+            "book_l": book_l,
             "elo_w": elo_w,
             "elo_l": elo_l,
         }
@@ -197,17 +202,16 @@ class PointInTimeBacktester:
         self,
         row: pd.Series,
         stats_engine: PointInTimeStats,
-        fallback_elo: Optional[FastEloMatcher],
     ) -> None:
-        feat = self._extract_row_features(row, stats_engine, fallback_elo)
-        odds_w, odds_l = self._estimate_model_odds(
-            feat["surf_w"],
-            feat["surf_l"],
-            feat["rank_w"],
-            feat["rank_l"],
-            feat["form_w"],
-            feat["form_l"],
-        )
+        feat = self._extract_row_features(row, stats_engine)
+        try:
+            odds_w, odds_l = self._estimate_model_odds(
+                feat["surf_w"], feat["surf_l"], feat["rank_w"], feat["rank_l"],
+                feat["form_w"], feat["form_l"], feat["elo_w"], feat["elo_l"],
+                feat["surface"], self.model, feat["match_date"],
+            )
+        except (ValueError, TypeError):
+            odds_w, odds_l = 0.0, 0.0
         status, bet = self._evaluate_row(feat, odds_w, odds_l)
         self.records.append({
             "date": feat["match_date"].strftime("%Y-%m-%d"),

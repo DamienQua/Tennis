@@ -11,20 +11,21 @@ class DateHelper:
     def calculate_matches_last_month(
         show_class: Sequence, today: float, one_month: int = 2629800
     ) -> int:
-        """Compte les matchs joués au cours du dernier mois."""
+        """Compte les lignes de matchs, selon la date de leur groupe de tournoi."""
         nb_match_last_month = 0
-        date_i = 1
-        for idx in range(2, len(show_class)):
-            if DateHelper.is_valid_date(show_class, idx, today, date_i, one_month):
+        group_date = None
+        for element in show_class:
+            label = element.text.strip()
+            if label == "Date":
+                group_date = None
+                continue
+            try:
+                group_date = datetime.strptime(label, "%b %d %Y").timestamp()
+                continue
+            except ValueError:
+                pass
+            if label and group_date is not None and 0 <= today - group_date <= one_month:
                 nb_match_last_month += 1
-            else:
-                date_i = DateHelper.update_date_index(
-                    show_class, idx, date_i, nb_match_last_month
-                )
-                if not DateHelper.is_within_last_month(
-                    show_class, date_i, today, one_month
-                ):
-                    break
         return nb_match_last_month
 
     @staticmethod

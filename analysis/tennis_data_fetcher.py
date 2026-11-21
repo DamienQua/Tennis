@@ -1,16 +1,15 @@
 """Client asynchrone TennisInsight avec cache LRU et retries."""
 
 import asyncio
-from collections import OrderedDict
 from typing import Any, Optional, Tuple
 import aiohttp
 from bs4 import BeautifulSoup
+from utils.http_client import request, shared_pane
 
 
 class TennisDataFetcher:
     """Récupère les panneaux AJAX TennisInsight de manière asynchrone."""
 
-    _activity_pane_cache: OrderedDict[str, str] = OrderedDict()
     _MAX_CACHE_SIZE = 256
 
     def __init__(self, session: aiohttp.ClientSession, admin_url: Optional[str] = None) -> None:
@@ -21,12 +20,8 @@ class TennisDataFetcher:
         """Exécute une requête HTTP avec backoff linéaire sur 3 tentatives."""
         for attempt in range(3):
             try:
-                req = (
-                    self.session.get(url)
-                    if method.upper() == "GET"
-                    else self.session.post(url, data=data)
-                )
-                async with req as response:
+                kwargs = {} if method.upper() == "GET" else {"data": data}
+                async with request(self.session, method, url, **kwargs) as response:
                     if response.status == 200:
                         text = await response.text()
                         if text:
@@ -51,17 +46,14 @@ class TennisDataFetcher:
     async def fetch_tournament_data(self, match_id: str, default_tour: str = "") -> str:
         """Récupère le nom officiel du tournoi depuis le panneau activity."""
         try:
-            if match_id not in self._activity_pane_cache:
-                pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
-                html = await self.fetch_data(self.admin_url, pane_req)
-                if html:
-                    self._activity_pane_cache[match_id] = html
-                    if len(self._activity_pane_cache) > self._MAX_CACHE_SIZE:
-                        self._activity_pane_cache.popitem(last=False)
-            else:
-                self._activity_pane_cache.move_to_end(match_id)
-
-            soup = BeautifulSoup(self._activity_pane_cache.get(match_id, ""), "lxml")
+            pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
+            html = await shared_pane(
+                self.session,
+                (self.admin_url, match_id),
+                lambda: self.fetch_data(self.admin_url, pane_req),
+                self._MAX_CACHE_SIZE,
+            )
+            soup = BeautifulSoup(html, "lxml")
             tour_name = self._extract_tournament_name(soup)
             if tour_name:
                 return tour_name

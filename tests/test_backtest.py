@@ -1,6 +1,9 @@
 import unittest
 import sys
 import os
+import tempfile
+import math
+import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from backtest.historical_odds import HistoricalOddsProvider
@@ -12,9 +15,20 @@ from backtest.point_in_time_backtest import PointInTimeBacktester, PointInTimeBa
 
 class TestBacktest(unittest.TestCase):
     """Unit tests for historical odds lookup and backtest strategy evaluation."""
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        pd.DataFrame([
+            {"Date": "2023-01-07", "Tournament": "Adelaide", "Winner": "Djokovic N.",
+             "Loser": "Medvedev D.", "B365W": 1.60, "B365L": 2.30, "Comment": "Completed"},
+            {"Date": "2023-03-03", "Tournament": "Dubai", "Winner": "Medvedev D.",
+             "Loser": "Djokovic N.", "B365W": 2.50, "B365L": 1.50, "Comment": "Completed"},
+        ]).to_excel(os.path.join(self.temp_dir.name, "atp_2023.xlsx"), index=False)
+
     def test_historical_odds_matching(self):
-        provider = HistoricalOddsProvider()
-        match = provider.get_match_odds("Novak Djokovic", "Daniil Medvedev", 2023, "atp")
+        provider = HistoricalOddsProvider(self.temp_dir.name)
+        match = provider.get_match_odds("Novak Djokovic", "Daniil Medvedev", 2023, "atp",
+                                        match_date="2023-01-07", tournament="Adelaide")
         self.assertIsNotNone(match)
         self.assertEqual(match["winner"], "Novak Djokovic")
         self.assertGreater(match["odds_a"]["b365"], 1.0)
@@ -43,7 +57,8 @@ class TestBacktest(unittest.TestCase):
         self.assertEqual(status_no_val, "PAS OK")
 
     def test_backtest_engine(self):
-        engine = BacktestEngine(output_dir="backtest/results_test")
+        engine = BacktestEngine(historical_odds=HistoricalOddsProvider(self.temp_dir.name),
+                                output_dir=self.temp_dir.name)
         res = engine.process_match_result(
             "url_test",
             "Novak Djokovic",
@@ -56,7 +71,7 @@ class TestBacktest(unittest.TestCase):
             surface_a=75.0,
             surface_b=70.0,
             year=2023,
-            gender="atp"
+            gender="atp", match_date="2023-01-07",
         )
         self.assertIsNotNone(res)
         summary = engine.evaluator.get_summary()
@@ -97,7 +112,7 @@ class TestBacktest(unittest.TestCase):
         p_12m_post, p_surf_post, total_post = stats.get_player_stats_before(
             "Player A", pd.Timestamp("2023-04-01"), "Hard"
         )
-        self.assertEqual(p_12m_post, 66.67)
+        self.assertAlmostEqual(p_12m_post, 100 * 2 / 3)
         self.assertEqual(p_surf_post, 50.0)
         self.assertEqual(total_post, 3)
 
@@ -105,8 +120,8 @@ class TestBacktest(unittest.TestCase):
         p_12m_unk, p_surf_unk, total_unk = stats.get_player_stats_before(
             "Unknown", pd.Timestamp("2023-04-01"), "Hard"
         )
-        self.assertEqual(p_12m_unk, 50.0)
-        self.assertEqual(p_surf_unk, 50.0)
+        self.assertTrue(math.isnan(p_12m_unk))
+        self.assertTrue(math.isnan(p_surf_unk))
         self.assertEqual(total_unk, 0)
 
     def test_point_in_time_backtester_alias(self):

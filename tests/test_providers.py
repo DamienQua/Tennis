@@ -67,7 +67,12 @@ def test_odds_match_rejects_homonyms_doubles_and_finished():
         '{"home-name":"Jannik Sinner","away-name":"Francisco Cerundolo",'
         '"isFinished":false,"maxOdds":1.25,"maxOdds":4.10}'
     )
-    assert process_odds(finished_and_upcoming_html, match) is True
+    assert process_odds(finished_and_upcoming_html, match) is False
+    upcoming_html = (
+        '{"home-name":"Jannik Sinner","away-name":"Francisco Cerundolo",'
+        '"status":"scheduled","marketName":"Match Winner","maxOdds":1.25,"maxOdds":4.10}'
+    )
+    assert process_odds(upcoming_html, match) is True
     assert match.player_a.book_odds == 4.10
     assert match.player_b.book_odds == 1.25
 

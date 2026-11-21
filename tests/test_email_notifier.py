@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 import sys
 import os
+import smtplib
+import ssl
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from strategy.email_notifier import (
@@ -95,8 +97,46 @@ class TestEmailNotifier(unittest.TestCase):
         success = send_daily_email(bets, total_matches=1, config=mock_cfg)
         self.assertTrue(success)
         mock_instance.starttls.assert_called_once()
+        context = mock_instance.starttls.call_args.kwargs["context"]
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
         mock_instance.login.assert_called_once_with("test@gmail.com", "secret_password")
         mock_instance.send_message.assert_called_once()
+
+    @patch("strategy.email_notifier.smtplib.SMTP")
+    def test_untrusted_certificate_stops_authentication(self, mock_smtp):
+        server = mock_smtp.return_value.__enter__.return_value
+        server.starttls.side_effect = ssl.SSLCertVerificationError("untrusted certificate")
+        cfg = {
+            "host": "smtp.example.invalid", "port": "587", "user": "test",
+            "password": "dummy", "recipient": "report@example.invalid",
+        }
+        self.assertFalse(send_daily_email([], filepath="missing.xlsx", config=cfg))
+        server.login.assert_not_called()
+        server.send_message.assert_not_called()
+
+    @patch("strategy.email_notifier.smtplib.SMTP")
+    def test_authentication_failure_is_reported(self, mock_smtp):
+        server = mock_smtp.return_value.__enter__.return_value
+        server.login.side_effect = smtplib.SMTPAuthenticationError(535, b"rejected")
+        cfg = {
+            "host": "smtp.example.invalid", "port": "587", "user": "test",
+            "password": "dummy", "recipient": "report@example.invalid",
+        }
+        self.assertFalse(send_daily_email([], filepath="missing.xlsx", config=cfg))
+        server.send_message.assert_not_called()
+
+    @patch("strategy.email_notifier._load_smtp_config")
+    def test_explicit_empty_config_does_not_load_environment(self, load_config):
+        self.assertFalse(send_daily_email([], config={}))
+        load_config.assert_not_called()
+
+    def test_invalid_port_is_reported(self):
+        cfg = {
+            "host": "smtp.example.invalid", "port": "invalid", "user": "test",
+            "password": "dummy", "recipient": "report@example.invalid",
+        }
+        self.assertFalse(send_daily_email([], filepath="missing.xlsx", config=cfg))
 
 if __name__ == "__main__":
     unittest.main()
