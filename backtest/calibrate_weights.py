@@ -1,48 +1,27 @@
-"""Calibration empirique des poids du modèle par surface avec validation hors échantillon."""
+"""Calibration empirique directe du modèle compare_players par surface (validation temporelle)."""
 
 import json
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+from analysis.compare_players import (
+    _DEFAULT_WEIGHTS,
+    _MAX_PROB,
+    _MIN_PROB,
+    extract_scoring_components,
+)
 from backtest.point_in_time_stats import PointInTimeStats
+from core.models import MatchAnalysisData, PlayerStats
+from utils.helpers import normalize_surface, safe_int
 
 DEFAULT_WEIGHTS_PATH = "config/calibrated_weights.json"
+DEFAULT_SURFACE_WEIGHTS = _DEFAULT_WEIGHTS
 
-DEFAULT_SURFACE_WEIGHTS: Dict[str, Dict[str, float]] = {
-    "hard": {"rank": 5.0, "form": 20.0, "surface": 30.0, "elo": 0.15, "trj": 0.90},
-    "clay": {"rank": 5.0, "form": 20.0, "surface": 35.0, "elo": 0.15, "trj": 0.90},
-    "grass": {"rank": 5.0, "form": 18.0, "surface": 32.0, "elo": 0.18, "trj": 0.90},
-}
-
-_INIT_LOGISTIC_WEIGHTS = np.array([0.8, 0.8, 1.2, 1.0], dtype=float)
-_L2_REG = 1e-4
 _TRAIN_RATIO = 0.80
-
-
-def _surface_bucket(surface: str) -> str:
-    s_low = surface.strip().lower()
-    if "clay" in s_low:
-        return "clay"
-    if "grass" in s_low:
-        return "grass"
-    return "hard"
-
-
-def _safe_rank(val: Any, default: float = 200.0) -> float:
-    if pd.isna(val):
-        return default
-    try:
-        parsed = float(val)
-        return parsed if parsed > 0 else default
-    except (ValueError, TypeError):
-        return default
-
-
-def _sigmoid(z: np.ndarray) -> np.ndarray:
-    clipped = np.clip(z, -20.0, 20.0)
-    return 1.0 / (1.0 + np.exp(-clipped))
+_ANCHOR_REG = 1e-5
+_WEIGHT_BOUNDS = [(0.5, 15.0), (5.0, 50.0), (5.0, 50.0), (0.0, 0.50)]
 
 
 def brier_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
@@ -59,67 +38,99 @@ def log_loss(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     return float(-np.mean(y_true * np.log(probs) + (1.0 - y_true) * np.log(1.0 - probs)))
 
 
-def _fit_logistic_weights(
-    x_train: np.ndarray,
+def _predict_compare_players_probs(
+    comp_matrix: np.ndarray, weights_vec: np.ndarray
+) -> np.ndarray:
+    """Évalue vectoriellement la probabilité exacte produite par compare_players().
+
+    Colonnes de comp_matrix :
+    [fixed_a, fixed_b, rank_a, rank_b, form_a, form_b, surf_a, surf_b, elo_a, elo_b]
+    """
+    w_rank, w_form, w_surf, w_elo = weights_vec
+    score_a = (
+        comp_matrix[:, 0]
+        + w_rank * comp_matrix[:, 2]
+        + w_form * comp_matrix[:, 4]
+        + w_surf * comp_matrix[:, 6]
+        + w_elo * comp_matrix[:, 8]
+    )
+    score_b = (
+        comp_matrix[:, 1]
+        + w_rank * comp_matrix[:, 3]
+        + w_form * comp_matrix[:, 5]
+        + w_surf * comp_matrix[:, 7]
+        + w_elo * comp_matrix[:, 9]
+    )
+    safe_a = np.maximum(0.0, score_a)
+    safe_b = np.maximum(0.0, score_b)
+    total = safe_a + safe_b
+    probs = np.where(total > 0.0, safe_a / np.where(total > 0.0, total, 1.0), 0.5)
+    return np.clip(probs, _MIN_PROB, _MAX_PROB)
+
+
+def _fit_direct_model_weights(
+    c_train: np.ndarray,
     y_train: np.ndarray,
-    x_val: np.ndarray,
+    c_val: np.ndarray,
     y_val: np.ndarray,
-    l2_reg: float = _L2_REG,
+    default_cfg: Dict[str, float],
 ) -> Tuple[np.ndarray, float, float, float, float]:
-    """Optimise [rank, form, surface, elo] sur Train et évalue Log-Loss / Brier sur Validation."""
-    init_val_probs = _sigmoid(x_val @ _INIT_LOGISTIC_WEIGHTS)
-    brier_before = brier_score(y_val, init_val_probs)
-    ll_before = log_loss(y_val, init_val_probs)
+    """Optimise [rank, form, surface, elo] directement sur compare_players()."""
+    init_w = np.array(
+        [default_cfg["rank"], default_cfg["form"], default_cfg["surface"], default_cfg["elo"]],
+        dtype=float,
+    )
+    base_val_probs = _predict_compare_players_probs(c_val, init_w)
+    brier_before = brier_score(y_val, base_val_probs)
+    ll_before = log_loss(y_val, base_val_probs)
+
+    scales = np.array([5.0, 20.0, 30.0, 0.15], dtype=float)
 
     def _objective(weights: np.ndarray) -> float:
-        probs = _sigmoid(x_train @ weights)
-        return log_loss(y_train, probs) + l2_reg * float(np.sum(weights ** 2))
+        probs = _predict_compare_players_probs(c_train, weights)
+        reg = _ANCHOR_REG * float(np.sum(((weights - init_w) / scales) ** 2))
+        return brier_score(y_train, probs) + reg
 
     res = minimize(
         _objective,
-        _INIT_LOGISTIC_WEIGHTS,
-        method="L-BFGS-B",
-        bounds=[(0.0, 10.0), (0.0, 10.0), (0.0, 10.0), (0.0, 10.0)],
+        init_w,
+        method="Powell",
+        bounds=_WEIGHT_BOUNDS,
+        options={"maxiter": 600, "ftol": 1e-6},
     )
-    opt_w = res.x
-    opt_val_probs = _sigmoid(x_val @ opt_w)
+    opt_w = np.clip(res.x, [b[0] for b in _WEIGHT_BOUNDS], [b[1] for b in _WEIGHT_BOUNDS])
+    opt_val_probs = _predict_compare_players_probs(c_val, opt_w)
     brier_after = brier_score(y_val, opt_val_probs)
     ll_after = log_loss(y_val, opt_val_probs)
     return opt_w, brier_before, brier_after, ll_before, ll_after
 
 
-def _map_to_model_weights(
-    opt_w: np.ndarray, default_cfg: Dict[str, float]
-) -> Dict[str, float]:
-    """Projette les poids logistiques sur l'échelle de compare_players.py sans écraser form/surface."""
-    w_rank, w_form, w_surf, w_elo = [float(v) for v in opt_w]
-    form_surf_sum = w_form + w_surf
-    if form_surf_sum > 1e-6:
-        form_w = round(min(max(50.0 * (w_form / form_surf_sum), 10.0), 40.0), 2)
-        surf_w = round(50.0 - form_w, 2)
-    else:
-        form_w = default_cfg["form"]
-        surf_w = default_cfg["surface"]
-
-    rank_w = round(min(max(w_rank * 4.0, 1.0), 10.0), 2)
-    elo_w = round(min(max(w_elo * 0.15, 0.05), 0.35), 4)
-    return {
-        "rank": rank_w,
-        "form": form_w,
-        "surface": surf_w,
-        "elo": elo_w,
-        "trj": 0.90,
-    }
+def _build_player_stats(
+    name: str, rank: int, elo: float, profile: Dict[str, float]
+) -> PlayerStats:
+    return PlayerStats(
+        name=name,
+        ranking=rank,
+        elo=elo,
+        win_pct_last_10=float(profile["win_pct_last_10"]),
+        win_pct_last_50=float(profile["win_pct_last_50"]),
+        win_pct_1y=float(profile["win_pct_1y"]),
+        win_pct_career=float(profile["win_pct_career"]),
+        win_pct_1y_surface=float(profile["win_pct_1y_surface"]),
+        win_pct_career_surface=float(profile["win_pct_career_surface"]),
+        matches_last_month=int(profile["matches_last_month"]),
+        data_sources={"point_in_time"},
+    )
 
 
 def _extract_surface_samples(
     df: pd.DataFrame, stats_engine: PointInTimeStats
-) -> Dict[str, Tuple[List[List[float]], List[float]]]:
-    """Construit les vecteurs symétriques (X, y) triés chronologiquement sans look-ahead bias."""
-    buckets: Dict[str, Tuple[List[List[float]], List[float]]] = {
-        "hard": ([], []),
-        "clay": ([], []),
-        "grass": ([], []),
+) -> Dict[str, Tuple[List[Tuple[float, ...]], List[float], List[str]]]:
+    """Construit les matrices exactes compare_players triées chronologiquement par surface."""
+    buckets: Dict[str, Tuple[List[Tuple[float, ...]], List[float], List[str]]] = {
+        "hard": ([], [], []),
+        "clay": ([], [], []),
+        "grass": ([], [], []),
     }
     if df.empty:
         return buckets
@@ -129,76 +140,109 @@ def _extract_surface_samples(
         return buckets
 
     completed["Date"] = pd.to_datetime(completed["Date"])
-    completed.sort_values("Date", inplace=True)
-    completed.reset_index(drop=True, inplace=True)
+    completed = completed.sort_values("Date").reset_index(drop=True)
 
     for idx, row in completed.iterrows():
         p_w, p_l = str(row["Winner"]), str(row["Loser"])
         m_date = row["Date"]
         surf = str(row.get("Surface", "Hard"))
-        bucket = _surface_bucket(surf)
+        bucket = normalize_surface(surf)
 
-        form_w, surf_w, cnt_w = stats_engine.get_player_stats_before(p_w, m_date, surf)
-        form_l, surf_l, cnt_l = stats_engine.get_player_stats_before(p_l, m_date, surf)
-        if cnt_w < 3 or cnt_l < 3:
+        prof_w = stats_engine.get_player_profile_before(p_w, m_date, surf)
+        prof_l = stats_engine.get_player_profile_before(p_l, m_date, surf)
+        if int(prof_w["matches_1y"]) < 3 or int(prof_l["matches_1y"]) < 3:
             continue
 
         elo_w = stats_engine.get_player_elo_before(p_w, m_date, surf)
         elo_l = stats_engine.get_player_elo_before(p_l, m_date, surf)
-        r_w = _safe_rank(row.get("WRank"))
-        r_l = _safe_rank(row.get("LRank"))
+        r_w = safe_int(row.get("WRank"), default=200) or 200
+        r_l = safe_int(row.get("LRank"), default=200) or 200
 
-        diff_rank = (r_l - r_w) / max(r_w, r_l, 1.0)
-        diff_form = (form_w - form_l) / 100.0
-        diff_surf = (surf_w - surf_l) / 100.0
-        diff_elo = (elo_w - elo_l) / 400.0
+        ps_w = _build_player_stats(p_w, r_w, elo_w, prof_w)
+        ps_l = _build_player_stats(p_l, r_l, elo_l, prof_l)
 
-        sign = 1.0 if int(idx) % 2 == 0 else -1.0
-        buckets[bucket][0].append(
-            [sign * diff_rank, sign * diff_form, sign * diff_surf, sign * diff_elo]
-        )
-        buckets[bucket][1].append(1.0 if sign > 0 else 0.0)
+        # Symétrie positionnelle (alterne vainqueur en J1 / J2)
+        if int(idx) % 2 == 0:
+            h2h = stats_engine.get_h2h_before(p_w, p_l, m_date, surf)
+            match_obj = MatchAnalysisData(
+                match_url="", surface=surf, player_a=ps_w, player_b=ps_l, h2h=h2h
+            )
+            label = 1.0
+        else:
+            h2h = stats_engine.get_h2h_before(p_l, p_w, m_date, surf)
+            match_obj = MatchAnalysisData(
+                match_url="", surface=surf, player_a=ps_l, player_b=ps_w, h2h=h2h
+            )
+            label = 0.0
+
+        buckets[bucket][0].append(extract_scoring_components(match_obj))
+        buckets[bucket][1].append(label)
+        buckets[bucket][2].append(m_date.strftime("%Y-%m-%d"))
 
     return buckets
 
 
 def calibrate_from_dataframe(
-    df: pd.DataFrame, output_path: str = DEFAULT_WEIGHTS_PATH
+    df: pd.DataFrame,
+    output_path: str = DEFAULT_WEIGHTS_PATH,
+    max_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Calibre les poids par surface avec validation chronologique Train/Test (80/20)."""
-    stats_engine = PointInTimeStats(df)
-    buckets = _extract_surface_samples(df, stats_engine)
+    """Calibre directement compare_players() avec validation temporelle stricte (80/20)."""
+    working_df = df.copy()
+    if max_date and not working_df.empty and "Date" in working_df.columns:
+        working_df["Date"] = pd.to_datetime(working_df["Date"])
+        working_df = working_df[working_df["Date"] < pd.to_datetime(max_date)]
+
+    stats_engine = PointInTimeStats(working_df)
+    buckets = _extract_surface_samples(working_df, stats_engine)
     calibrated: Dict[str, Any] = {}
 
-    for surf, (x_list, y_list) in buckets.items():
+    for surf, (c_list, y_list, d_list) in buckets.items():
         default_cfg = DEFAULT_SURFACE_WEIGHTS[surf]
-        if len(x_list) < 20:
-            calibrated[surf] = {**default_cfg, "samples": len(x_list), "accepted": False}
+        if len(c_list) < 20:
+            calibrated[surf] = {
+                **default_cfg,
+                "samples": len(c_list),
+                "accepted": False,
+                "trained_until": d_list[-1] if d_list else "",
+            }
             continue
 
-        x_arr = np.asarray(x_list, dtype=float)
+        c_arr = np.asarray(c_list, dtype=float)
         y_arr = np.asarray(y_list, dtype=float)
-        split_idx = max(10, min(len(x_arr) - 5, int(len(x_arr) * _TRAIN_RATIO)))
+        split_idx = max(10, min(len(c_arr) - 5, int(len(c_arr) * _TRAIN_RATIO)))
 
-        opt_w, b_before, b_after, ll_before, ll_after = _fit_logistic_weights(
-            x_arr[:split_idx], y_arr[:split_idx], x_arr[split_idx:], y_arr[split_idx:]
+        opt_w, b_before, b_after, ll_before, ll_after = _fit_direct_model_weights(
+            c_arr[:split_idx], y_arr[:split_idx], c_arr[split_idx:], y_arr[split_idx:], default_cfg
         )
 
-        accepted = b_after <= b_before
+        accepted = b_after < b_before
         chosen_weights = (
-            _map_to_model_weights(opt_w, default_cfg) if accepted else dict(default_cfg)
+            {
+                "rank": round(float(opt_w[0]), 2),
+                "form": round(float(opt_w[1]), 2),
+                "surface": round(float(opt_w[2]), 2),
+                "elo": round(float(opt_w[3]), 4),
+                "trj": 0.90,
+            }
+            if accepted
+            else dict(default_cfg)
         )
         calibrated[surf] = {
             **chosen_weights,
-            "samples": len(x_list),
+            "samples": len(c_list),
             "train_samples": split_idx,
-            "val_samples": len(x_list) - split_idx,
+            "val_samples": len(c_list) - split_idx,
+            "trained_until": d_list[-1],
+            "train_end": d_list[split_idx - 1],
+            "val_start": d_list[split_idx],
+            "val_end": d_list[-1],
             "accepted": accepted,
-            "brier_before": round(b_before, 4),
-            "brier_after": round(b_after if accepted else b_before, 4),
-            "candidate_brier_after": round(b_after, 4),
-            "logloss_before": round(ll_before, 4),
-            "logloss_after": round(ll_after if accepted else ll_before, 4),
+            "brier_before": round(b_before, 6),
+            "brier_after": round(b_after if accepted else b_before, 6),
+            "candidate_brier_after": round(b_after, 6),
+            "logloss_before": round(ll_before, 6),
+            "logloss_after": round(ll_after if accepted else ll_before, 6),
         }
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -208,9 +252,11 @@ def calibrate_from_dataframe(
 
 
 def calibrate_from_archives(
-    data_dir: str = "backtest/data", output_path: str = DEFAULT_WEIGHTS_PATH
+    data_dir: str = "backtest/data",
+    output_path: str = DEFAULT_WEIGHTS_PATH,
+    max_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Charge toutes les archives 2022-2026 disponibles et lance la calibration."""
+    """Charge toutes les archives 2022-2026 disponibles et lance la calibration directe."""
     frames = []
     for gender in ("atp", "wta"):
         for year in (2022, 2023, 2024, 2025, 2026):
@@ -220,7 +266,7 @@ def calibrate_from_archives(
     if not frames:
         return calibrate_from_dataframe(pd.DataFrame(), output_path=output_path)
     combined = pd.concat(frames, ignore_index=True)
-    return calibrate_from_dataframe(combined, output_path=output_path)
+    return calibrate_from_dataframe(combined, output_path=output_path, max_date=max_date)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """Modèles de données typés pour l'analyse de matchs de tennis."""
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Set, Tuple
 
 
 @dataclass
@@ -33,6 +33,25 @@ class PlayerStats:
     model_odds: float = 0.0
     book_odds: float = 0.0
     odds_spread: float = 0.0
+
+    # Traçabilité des sources alimentées (distingue valeur nulle vs donnée absente)
+    data_sources: Set[str] = field(default_factory=set)
+
+    def has_form_stats(self) -> bool:
+        """Indique si des statistiques de forme/surface réelles ont été alimentées."""
+        if self.data_sources:
+            return True
+        return any(
+            val > 0.0
+            for val in (
+                self.win_pct_last_10,
+                self.win_pct_last_50,
+                self.win_pct_1y,
+                self.win_pct_career,
+                self.win_pct_1y_surface,
+                self.win_pct_career_surface,
+            )
+        )
 
 
 @dataclass
@@ -67,7 +86,7 @@ class ConfidenceMetrics:
 
 @dataclass
 class MatchAnalysisData:
-    """Représentation complète d'un match analysé (remplace match_vs)."""
+    """Représentation complète d'un match analysé."""
 
     match_url: str
     tournament: str = ""
@@ -80,6 +99,10 @@ class MatchAnalysisData:
     def get_player(self, index: int) -> PlayerStats:
         """Retourne player_a (0) ou player_b (1)."""
         return self.player_a if index == 0 else self.player_b
+
+    def has_sufficient_stats(self) -> bool:
+        """Vérifie que les deux joueurs disposent de statistiques sources avant tout signal."""
+        return self.player_a.has_form_stats() and self.player_b.has_form_stats()
 
     def to_summary_line(self) -> str:
         """Formate la ligne de sortie compatible avec Matchs.txt."""

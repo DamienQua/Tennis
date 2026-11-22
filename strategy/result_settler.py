@@ -4,12 +4,12 @@ import asyncio
 import logging
 import re
 from typing import TYPE_CHECKING, Optional, Tuple
-import unicodedata
 import aiohttp
 from bs4 import BeautifulSoup
 from core.models import MatchAnalysisData, PlayerStats
 from core.player_extractor import PlayerExtractor
 from data_providers.odds_match import odds_match
+from utils.helpers import normalize_text
 
 if TYPE_CHECKING:
     from core.database import TennisDatabase
@@ -17,48 +17,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _LIVE_MARKERS = ("in progress", "live now", "live score")
-_CHAR_TRANSLATION = str.maketrans({
-    "ł": "l",
-    "Ł": "l",
-    "đ": "d",
-    "Đ": "d",
-    "ø": "o",
-    "Ø": "o",
-    "ß": "ss",
-})
 
 
-def _normalize_text(text: str) -> str:
-    """Supprime les accents/diacritiques et normalise la casse et les espaces."""
-    translated = (text or "").translate(_CHAR_TRANSLATION)
-    decomposed = unicodedata.normalize("NFKD", translated)
-    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return re.sub(r"\s+", " ", stripped).strip().lower()
-
-
-def _player_variants(player_name: str) -> Tuple[str, ...]:
-    """Retourne les variantes normalisées (nom complet, alias, nom de famille)."""
+def _full_name_variants(player_name: str) -> Tuple[str, ...]:
+    """Retourne les variantes nom complet (original + alias), sans patronyme isolé."""
     raw = (player_name or "").strip()
     if not raw:
         return ()
     alias = PlayerExtractor.PLAYER_ALIASES.get(raw, raw)
-    candidates = []
+    variants = []
     for name in (raw, alias):
-        norm = _normalize_text(name)
-        if norm and norm not in candidates:
-            candidates.append(norm)
-        parts = norm.split()
-        if len(parts) >= 2:
-            surname = parts[-1]
-            if len(surname) >= 3 and surname not in candidates:
-                candidates.append(surname)
-    return tuple(candidates)
+        norm = normalize_text(name)
+        if norm and norm not in variants:
+            variants.append(norm)
+    return tuple(variants)
 
 
-def _name_in_segment(player_name: str, segment: str) -> bool:
-    norm_seg = _normalize_text(segment)
-    for variant in _player_variants(player_name):
-        if re.search(rf"\b{re.escape(variant)}\b", norm_seg):
+def _surname(player_name: str) -> str:
+    parts = normalize_text(player_name).split()
+    return parts[-1] if parts else ""
+
+
+def _initial_surname_variants(player_name: str) -> Tuple[str, ...]:
+    """Retourne les formes abrégées type 'f cerundolo' / 'j m cerundolo'."""
+    parts = normalize_text(player_name).split()
+    if len(parts) < 2:
+        return ()
+    sur = parts[-1]
+    variants = [f"{parts[0][0]} {sur}"]
+    if len(parts) >= 3:
+        initials = " ".join(p[0] for p in parts[:-1])
+        variants.append(f"{initials} {sur}")
+    return tuple(dict.fromkeys(variants))
+
+
+def _variants_in_segment(variants: Tuple[str, ...], segment: str) -> bool:
+    norm_seg = normalize_text(segment).replace(".", " ")
+    norm_seg = re.sub(r"\s+", " ", norm_seg).strip()
+    for variant in variants:
+        if variant and re.search(rf"\b{re.escape(variant)}\b", norm_seg):
             return True
     return False
 
@@ -102,6 +99,50 @@ def _extract_fallback_winner(before_segment: str) -> Optional[str]:
     return match_name.group(1).strip() if match_name else None
 
 
+def _resolve_winner_from_pair(
+    before: str, after: str, player_a: str, player_b: str
+) -> Optional[str]:
+    """Identifie le vainqueur sans ambiguïté (priorité noms complets, rejet si homonymie ambiguë)."""
+    seg_before = before[-120:]
+    seg_after = after[:120]
+
+    # 1. Correspondance par nom complet / alias (indispensable pour les frères/homonymes)
+    a_full_b = _variants_in_segment(_full_name_variants(player_a), seg_before)
+    b_full_b = _variants_in_segment(_full_name_variants(player_b), seg_before)
+    if a_full_b and not b_full_b:
+        return player_a
+    if b_full_b and not a_full_b:
+        return player_b
+    if a_full_b and b_full_b:
+        return None
+
+    # 2. Correspondance par initiale + patronyme ('F. Cerundolo' vs 'J. M. Cerundolo')
+    a_init_b = _variants_in_segment(_initial_surname_variants(player_a), seg_before)
+    b_init_b = _variants_in_segment(_initial_surname_variants(player_b), seg_before)
+    if a_init_b and not b_init_b:
+        return player_a
+    if b_init_b and not a_init_b:
+        return player_b
+    if a_init_b and b_init_b:
+        return None
+
+    # 3. Patronyme seul UNIQUEMENT si les deux joueurs ont des noms de famille distincts
+    sur_a, sur_b = _surname(player_a), _surname(player_b)
+    if not sur_a or not sur_b or sur_a == sur_b:
+        return None
+
+    a_sur_b = _variants_in_segment((sur_a,), seg_before)
+    b_sur_b = _variants_in_segment((sur_b,), seg_before)
+    a_sur_a = _variants_in_segment((sur_a,), seg_after)
+    b_sur_a = _variants_in_segment((sur_b,), seg_after)
+
+    if a_sur_b and not b_sur_b and (b_sur_a or not a_sur_a):
+        return player_a
+    if b_sur_b and not a_sur_b and (a_sur_a or not b_sur_a):
+        return player_b
+    return None
+
+
 def _parse_match_outcome(
     html: str, player_a: str = "", player_b: str = ""
 ) -> Tuple[Optional[str], bool]:
@@ -118,15 +159,8 @@ def _parse_match_outcome(
     is_void = _is_void_outcome(header_text)
 
     if player_a and player_b:
-        a_before = _name_in_segment(player_a, before[-120:])
-        b_before = _name_in_segment(player_b, before[-120:])
-        a_after = _name_in_segment(player_a, after[:120])
-        b_after = _name_in_segment(player_b, after[:120])
-
-        if a_before and (b_after or not b_before):
-            return player_a, is_void
-        if b_before and (a_after or not a_before):
-            return player_b, is_void
+        winner = _resolve_winner_from_pair(before, after, player_a, player_b)
+        return (winner, is_void) if winner else (None, False)
 
     winner = _extract_fallback_winner(before[-120:])
     if not winner:
@@ -144,7 +178,7 @@ async def _refresh_clv_for_pending(
         player_b=PlayerStats(name=bet["player_b"]),
     )
     await odds_match(temp_match, session=session)
-    is_p1 = _normalize_text(bet["selected_player"]) == _normalize_text(bet["player_a"])
+    is_p1 = normalize_text(bet["selected_player"]) == normalize_text(bet["player_a"])
     latest_odds = temp_match.player_a.book_odds if is_p1 else temp_match.player_b.book_odds
     if latest_odds > 1.0:
         db.update_closing_odds(bet["match_url"], latest_odds)

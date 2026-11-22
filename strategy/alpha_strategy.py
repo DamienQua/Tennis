@@ -1,7 +1,7 @@
 """Stratégie de détection Value Betting Alpha 5+ All-Court avec dimensionnement Kelly."""
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 from utils.helpers import get_arg
 
 if TYPE_CHECKING:
@@ -113,12 +113,13 @@ def format_alpha_summary(res: Dict[str, Any]) -> str:
     )
 
 
-def _extract_players_adapter(args: tuple, kwargs: dict) -> Tuple[Any, Any]:
-    """Résout (player_a, player_b) sans importer core.models au runtime."""
+def _extract_players_adapter(args: tuple, kwargs: dict) -> Tuple[Any, Any, Optional[Any]]:
+    """Résout (player_a, player_b, match_obj) sans importer core.models au runtime."""
     if args and hasattr(args[0], "player_a"):
-        return args[0].player_a, args[0].player_b
+        return args[0].player_a, args[0].player_b, args[0]
     if "match" in kwargs and hasattr(kwargs["match"], "player_a"):
-        return kwargs["match"].player_a, kwargs["match"].player_b
+        match_obj = kwargs["match"]
+        return match_obj.player_a, match_obj.player_b, match_obj
 
     pa = SimpleNamespace(
         model_odds=_safe_float(get_arg(args, 0, kwargs.get("model_1", 0.0))),
@@ -132,14 +133,20 @@ def _extract_players_adapter(args: tuple, kwargs: dict) -> Tuple[Any, Any]:
         elo=_safe_float(get_arg(args, 5, kwargs.get("elo_2", 0.0))),
         name=str(get_arg(args, 7, kwargs.get("player_2", "Joueur 2"))),
     )
-    return pa, pb
+    return pa, pb, None
 
 
 def evaluate_alpha_strategy(*args, **kwargs) -> Dict[str, Any]:
     """Évalue la stratégie Alpha 5+ sur MatchAnalysisData ou paramètres bruts."""
-    pa, pb = _extract_players_adapter(args, kwargs)
+    pa, pb, match_obj = _extract_players_adapter(args, kwargs)
+    stats_complete = (
+        match_obj.has_sufficient_stats()
+        if (match_obj is not None and hasattr(match_obj, "has_sufficient_stats"))
+        else True
+    )
     data_valid = (
-        min(pa.model_odds, pb.model_odds) >= MIN_VALID_MODEL_ODDS
+        stats_complete
+        and min(pa.model_odds, pb.model_odds) >= MIN_VALID_MODEL_ODDS
         and min(pa.book_odds, pb.book_odds) > 1.01
         and min(pa.elo, pb.elo) > 0
     )

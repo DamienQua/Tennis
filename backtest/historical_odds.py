@@ -1,9 +1,13 @@
-"""Fournisseur de cotes historiques Tennis-Data.co.uk avec indexation O(1)."""
+"""Fournisseur de cotes historiques Tennis-Data.co.uk avec indexation O(1) et désambiguïsation."""
 
+import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 import jaro
 import pandas as pd
+from utils.helpers import normalize_text
+
+logger = logging.getLogger(__name__)
 
 
 class HistoricalOddsProvider:
@@ -43,16 +47,14 @@ class HistoricalOddsProvider:
     @staticmethod
     def _extract_surname_and_initial(raw_name: str) -> Tuple[str, str]:
         """Normalise 'Novak Djokovic' ou 'Djokovic N.' en (nom_famille, initiale)."""
-        clean = raw_name.replace(".", "").replace("-", " ").strip().lower()
+        clean = normalize_text(raw_name).replace(".", "").replace("-", " ").strip()
         parts = clean.split()
         if not parts:
             return "", ""
         if len(parts) == 1:
             return parts[0], ""
-        # Format Tennis-Data : 'djokovic n' (initiale en dernier)
         if len(parts[-1]) == 1:
             return " ".join(parts[:-1]), parts[-1]
-        # Format standard : 'novak djokovic' (prénom en premier)
         return parts[-1], parts[0][0]
 
     @classmethod
@@ -66,8 +68,8 @@ class HistoricalOddsProvider:
         if p_surname == c_surname and (not p_init or not c_init or p_init == c_init):
             return True
 
-        p_clean = player_full_name.replace("-", " ").strip().lower()
-        c_clean = candidate_name.replace(".", "").strip().lower()
+        p_clean = normalize_text(player_full_name).replace("-", " ")
+        c_clean = normalize_text(candidate_name).replace(".", "")
         return jaro.jaro_winkler_metric(p_clean, c_clean) >= 0.88
 
     def _candidate_row_indices(
@@ -81,30 +83,110 @@ class HistoricalOddsProvider:
             return sorted(candidates)
         return list(range(len(data_frame)))
 
-    def _find_match_row(
+    def _find_all_match_rows(
         self, key: str, data_frame: pd.DataFrame, player_a: str, player_b: str
-    ) -> Optional[Tuple[pd.Series, bool]]:
-        """Recherche un match entre player_a et player_b via l'index."""
+    ) -> List[Tuple[pd.Series, bool]]:
+        matches: List[Tuple[pd.Series, bool]] = []
         for idx in self._candidate_row_indices(key, data_frame, player_a, player_b):
             row = data_frame.iloc[idx]
             winner_name = str(row["Winner"])
             loser_name = str(row["Loser"])
             if self._name_matches(player_a, winner_name) and self._name_matches(player_b, loser_name):
-                return row, True
-            if self._name_matches(player_b, winner_name) and self._name_matches(player_a, loser_name):
-                return row, False
+                matches.append((row, True))
+            elif self._name_matches(player_b, winner_name) and self._name_matches(player_a, loser_name):
+                matches.append((row, False))
+        return matches
+
+    @staticmethod
+    def _tournament_similarity(query_tour: str, row_tour: str) -> float:
+        q_norm = normalize_text(query_tour)
+        r_norm = normalize_text(row_tour)
+        if not q_norm or not r_norm:
+            return 0.0
+        if q_norm in r_norm or r_norm in q_norm:
+            return 1.0
+        q_tokens = {tok for tok in q_norm.split() if len(tok) >= 3}
+        r_tokens = {tok for tok in r_norm.split() if len(tok) >= 3}
+        if q_tokens and r_tokens and (q_tokens & r_tokens):
+            return 0.9
+        return float(jaro.jaro_winkler_metric(q_norm, r_norm))
+
+    @classmethod
+    def _disambiguate_matches(
+        cls,
+        matches: List[Tuple[pd.Series, bool]],
+        tournament: Optional[str],
+        match_date: Optional[str],
+        round_name: Optional[str],
+    ) -> Optional[Tuple[pd.Series, bool]]:
+        if len(matches) == 1:
+            return matches[0]
+
+        filtered = list(matches)
+        if match_date:
+            try:
+                target_dt = pd.to_datetime(match_date)
+                date_filtered = [
+                    item
+                    for item in filtered
+                    if abs((pd.to_datetime(item[0].get("Date")) - target_dt).days) <= 3
+                ]
+                if date_filtered:
+                    filtered = date_filtered
+            except (ValueError, TypeError):
+                pass
+
+        if len(filtered) > 1 and tournament:
+            scored = [
+                (cls._tournament_similarity(tournament, str(item[0].get("Tournament", ""))), item)
+                for item in filtered
+            ]
+            best_score = max(score for score, _ in scored)
+            if best_score >= 0.75:
+                filtered = [item for score, item in scored if score >= best_score - 0.05]
+
+        if len(filtered) > 1 and round_name:
+            r_low = normalize_text(round_name)
+            round_filtered = [
+                item
+                for item in filtered
+                if r_low and r_low in normalize_text(str(item[0].get("Round", "")))
+            ]
+            if round_filtered:
+                filtered = round_filtered
+
+        if len(filtered) == 1:
+            return filtered[0]
+
+        logger.warning(
+            "Confrontation historique ambiguë (%d matchs correspondants pour tournament=%r, date=%r).",
+            len(filtered),
+            tournament,
+            match_date,
+        )
         return None
 
     def get_match_odds(
-        self, player_a: str, player_b: str, year: int, gender: str = "atp"
+        self,
+        player_a: str,
+        player_b: str,
+        year: int,
+        gender: str = "atp",
+        tournament: Optional[str] = None,
+        match_date: Optional[str] = None,
+        round_name: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Retourne les cotes de clôture et le vainqueur réel du match."""
+        """Retourne les cotes de clôture et le vainqueur réel, ou None si ambigu/introuvable."""
         key = f"{gender.lower()}_{year}"
         data_frame = self._load_dataset(year, gender)
         if data_frame.empty:
             return None
 
-        found = self._find_match_row(key, data_frame, player_a, player_b)
+        matches = self._find_all_match_rows(key, data_frame, player_a, player_b)
+        if not matches:
+            return None
+
+        found = self._disambiguate_matches(matches, tournament, match_date, round_name)
         if not found:
             return None
 

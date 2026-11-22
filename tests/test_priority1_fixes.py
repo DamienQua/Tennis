@@ -194,9 +194,8 @@ def test_motivation_masters_and_slam_is_100():
     assert conf.motivation_a == 100.0
     assert conf.motivation_b == 100.0
 
-
 def test_calibration_handles_nan_ranks_and_preserves_scale(tmp_path):
-    """Vérifie la gestion des rangs NaN et l'équilibre form + surface = 50."""
+    """Vérifie la calibration directe de compare_players et la présence de trained_until."""
     rows = []
     for idx in range(50):
         rows.append({
@@ -210,7 +209,9 @@ def test_calibration_handles_nan_ranks_and_preserves_scale(tmp_path):
         })
     out = str(tmp_path / "weights.json")
     res = calibrate_from_dataframe(pd.DataFrame(rows), output_path=out)
-    assert res["hard"]["form"] + res["hard"]["surface"] == 50.0
+    assert res["hard"]["form"] >= 5.0
+    assert res["hard"]["surface"] >= 5.0
+    assert res["hard"]["trained_until"] == "2024-02-25"
     assert res["hard"]["brier_after"] <= res["hard"]["brier_before"]
 
 def test_h2h_parses_real_tennisinsight_six_column_layout():

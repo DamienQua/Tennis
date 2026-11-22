@@ -16,6 +16,7 @@ from core.database import TennisDatabase
 from core.models import MatchAnalysisData
 from core.player_extractor import extract_player_ids, extract_player_names
 from core.tournament_extractor import (
+    check_match_prematch_status,
     determine_tournament_and_surface,
     parse_player_rankings,
     who_is_favorite,
@@ -24,7 +25,7 @@ from data_providers.elo_matcher import EloMatcher
 from data_providers.odds_match import odds_match, fetch_both_odds
 from strategy.alpha_strategy import evaluate_alpha_strategy
 from strategy.generate_match_xlsx import generate_match_xlsx
-from utils.helpers import fetch_with_retry
+from utils.helpers import canonicalize_match_url, fetch_with_retry
 
 logger = logging.getLogger(__name__)
 ADMIN_URL = "https://tennisinsight.com/wp-admin/admin-ajax.php"
@@ -142,7 +143,8 @@ async def _run_analysis_phases(
 ) -> None:
     """Exécute motivation, forme récente et H2H en parallèle."""
     today = time.time()
-    favorite = who_is_favorite(parsed["soup_overview"])
+    book_pair = (match.player_a.book_odds, match.player_b.book_odds)
+    favorite = who_is_favorite(parsed["soup_overview"], book_odds=book_pair)
     id_a, id_b = parsed["ids"]
     m_id = parsed["match_id"]
 
@@ -207,13 +209,23 @@ async def analyze_match(
     tournaments: Sequence[str],
     elo_data: str,
     db: Optional[TennisDatabase] = None,
+    enforce_prematch: bool = True,
 ) -> Optional[MatchAnalysisData]:
     """Point d'entrée complet d'analyse d'un match."""
-    parsed = await _fetch_match_soups(session, match_url)
+    canon_url = canonicalize_match_url(match_url)
+    parsed = await _fetch_match_soups(session, canon_url)
     if not parsed:
         return None
 
-    match = MatchAnalysisData(match_url=match_url)
+    if enforce_prematch:
+        is_prematch, reason = check_match_prematch_status(
+            parsed["soup_main"], parsed["soup_overview"]
+        )
+        if not is_prematch:
+            logger.info("Match ignoré (hors pré-match : %s) : %s", reason, canon_url)
+            return None
+
+    match = MatchAnalysisData(match_url=canon_url)
     _populate_metadata(match, tournaments, parsed["soup_main"], parsed["soup_overview"])
     _populate_elo_ratings(elo_data, match)
 

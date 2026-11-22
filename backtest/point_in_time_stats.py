@@ -23,10 +23,8 @@ class PointInTimeStats:
     """Maintient l'historique, le H2H et l'ELO glissant par surface avant chaque match."""
 
     def __init__(self, matches_df: pd.DataFrame) -> None:
-        # player -> List[(date, surf_bucket, is_win, opponent)]
         self.player_history: Dict[str, List[Tuple[pd.Timestamp, str, bool, str]]] = {}
         self.player_dates: Dict[str, List[pd.Timestamp]] = {}
-        # player -> surface -> List[(date, elo_avant_match, elo_apres_match)]
         self.elo_history: Dict[str, Dict[str, List[Tuple[pd.Timestamp, float, float]]]] = {}
         self.elo_dates: Dict[str, Dict[str, List[pd.Timestamp]]] = {}
         self._build_index(matches_df)
@@ -49,7 +47,7 @@ class PointInTimeStats:
             return
         df_sorted = matches_df.copy()
         df_sorted["Date"] = pd.to_datetime(df_sorted["Date"])
-        df_sorted.sort_values("Date", inplace=True)
+        df_sorted = df_sorted.sort_values("Date").reset_index(drop=True)
 
         current_elo: Dict[Tuple[str, str], float] = {}
 
@@ -208,7 +206,11 @@ class PointInTimeStats:
 
         def _pair(wa: int, wb: int) -> Tuple[float, float]:
             tot = wa + wb
-            return (0.0, 0.0) if tot == 0 else (round(100.0 * wa / tot, 2), round(100.0 * wb / tot, 2))
+            return (
+                (0.0, 0.0)
+                if tot == 0
+                else (round(100.0 * wa / tot, 2), round(100.0 * wb / tot, 2))
+            )
 
         return H2HMetrics(
             all_time=_pair(w_all, l_all),

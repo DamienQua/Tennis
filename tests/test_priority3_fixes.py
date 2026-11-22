@@ -1,5 +1,6 @@
 """Tests de non-régression pour les correctifs Priorité 3."""
 
+
 import pandas as pd
 from analysis.compare_players import compare_players
 from backtest.point_in_time_backtest import PointInTimeBacktester
@@ -114,6 +115,6 @@ def test_point_in_time_backtester_uses_production_compare_players(tmp_path):
         ),
         h2h=stats.get_h2h_before("Sinner J.", "Fritz T.", m2_date, "Hard"),
     )
-    compare_players(ref)
+    compare_players(ref, as_of_date="2024-01-20")
     assert backtester.records[1]["model_w"] == ref.player_a.model_odds
     assert backtester.records[1]["model_l"] == ref.player_b.model_odds

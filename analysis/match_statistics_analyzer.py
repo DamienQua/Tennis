@@ -54,8 +54,10 @@ class MatchStatisticsAnalyzer:
         except (IndexError, ValueError, AttributeError, TypeError):
             return default_stats
 
-    def calculate_tiebreak_stats(self, stats_match: BeautifulSoup) -> Tuple[float, float]:
-        """Calcule le pourcentage de tie-breaks remportés par chaque joueur."""
+    def calculate_tiebreak_stats(
+        self, stats_match: BeautifulSoup, flag: int = 0
+    ) -> Tuple[float, float]:
+        """Calcule (% tie-breaks J1, % tie-breaks J2) orienté selon flag (0=J1 vainqueur H2H, 1=J2)."""
         if not stats_match:
             return 0.0, 0.0
         try:
@@ -65,21 +67,23 @@ class MatchStatisticsAnalyzer:
                 return 0.0, 0.0
             scores = re.sub(r"\([^)]*\)", "", headers[0].text.strip())
             if scores:
-                tb_j1, tb_j2 = self.parse_tiebreak_scores(scores)
-                total = tb_j1 + tb_j2
+                tb_winner, tb_loser = self.parse_tiebreak_scores(scores)
+                total = tb_winner + tb_loser
                 if total > 0:
-                    return (100.0 * tb_j1 / total, 100.0 * tb_j2 / total)
+                    pct_winner = 100.0 * tb_winner / total
+                    pct_loser = 100.0 * tb_loser / total
+                    return (pct_loser, pct_winner) if flag == 1 else (pct_winner, pct_loser)
         except (IndexError, ValueError, AttributeError, TypeError):
             return 0.0, 0.0
         return 0.0, 0.0
 
     def parse_tiebreak_scores(self, scores: str) -> Tuple[int, int]:
-        """Compte les tie-breaks gagnés dans la chaîne de score."""
-        tb_j1, tb_j2 = 0, 0
+        """Compte les tie-breaks gagnés dans la chaîne de score (vainqueur à gauche)."""
+        tb_winner, tb_loser = 0, 0
         for score in scores.split():
             if self.is_tiebreak(score):
-                tb_j1, tb_j2 = self.update_tiebreak_counts(score, tb_j1, tb_j2)
-        return tb_j1, tb_j2
+                tb_winner, tb_loser = self.update_tiebreak_counts(score, tb_winner, tb_loser)
+        return tb_winner, tb_loser
 
     @staticmethod
     def is_tiebreak(score: str) -> bool:

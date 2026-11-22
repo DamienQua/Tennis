@@ -56,6 +56,8 @@ class TennisMatchAnalyzer:
         last_flag: int,
         favorite: Sequence[int],
     ) -> None:
+        if favorite[0] == 0 and favorite[1] == 0:
+            return
         try:
             odds_spread = await self.data_fetcher.fetch_player_activity_with_odds(
                 player_id, match_id, 1, last_flag, favorite
@@ -93,13 +95,20 @@ class TennisMatchAnalyzer:
         tour_now, act1, surf = await self._fetch_match_context(
             match_id, player_id, match.tournament
         )
-        win_percentages = self.extract_win_percentages(act1, surf)
+        raw_all = self.stats_processor.calculate_win_percentages(act1)
+        raw_surf = self.stats_processor.calculate_win_percentages(surf)
+        win_percentages = self._combine_win_percentages(raw_all, raw_surf)
         match_stats = await self.match_statistics_processor.process_match_statistics(
             player_id, match_id, tour_now, activity_data=act1
         )
         nb_matches = self.calculate_matches_last_month(today, act1)
 
         player = match.get_player(last_flag)
+        if raw_all:
+            player.data_sources.add("activity")
+        if raw_surf:
+            player.data_sources.add("surface")
+
         player.win_pct_last_10 = win_percentages[0]
         player.win_pct_last_50 = win_percentages[1]
         player.win_pct_1y = win_percentages[2]
@@ -115,15 +124,19 @@ class TennisMatchAnalyzer:
         await self._update_player_odds(match, player_id, match_id, last_flag, favorite)
         return match
 
+    @staticmethod
+    def _combine_win_percentages(raw_all: List[float], raw_surf: List[float]) -> List[float]:
+        all_percentages = (list(raw_all) + [0.0] * 4)[:4]
+        surf_part = raw_surf[2:] if len(raw_surf) >= 3 else raw_surf
+        surface_percentages = (list(surf_part) + [0.0] * 2)[:2]
+        return all_percentages + surface_percentages
+
     def extract_win_percentages(
         self, data_act1: Optional[BeautifulSoup], data_surf: Optional[BeautifulSoup]
     ) -> List[float]:
         raw_all = self.stats_processor.calculate_win_percentages(data_act1)
-        all_percentages = (list(raw_all) + [0.0] * 4)[:4]
         raw_surf = self.stats_processor.calculate_win_percentages(data_surf)
-        surf_part = raw_surf[2:] if len(raw_surf) >= 3 else raw_surf
-        surface_percentages = (list(surf_part) + [0.0] * 2)[:2]
-        return all_percentages + surface_percentages
+        return self._combine_win_percentages(raw_all, raw_surf)
 
     @staticmethod
     def calculate_matches_last_month(today: float, data: Optional[BeautifulSoup]) -> int:

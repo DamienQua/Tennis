@@ -3,24 +3,18 @@
 import asyncio
 import re
 from typing import List, Optional, Tuple
-import unicodedata
 from urllib.parse import quote
 import aiohttp
 from core.models import MatchAnalysisData
+from utils.helpers import normalize_text
 
 _Q = r'(?:&quot;|\\"|")'
+_JSON_EVENT_RE = re.compile(rf"{_Q}home-name{_Q}")
 ODDS_TIMEOUT_SECONDS = 6.0
 
 
-def _normalize_text(text: str) -> str:
-    """Supprime les accents/diacritiques et normalise la casse et les espaces."""
-    decomposed = unicodedata.normalize("NFKD", text or "")
-    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return re.sub(r"\s+", " ", stripped).strip().lower()
-
-
 def _extract_surname_and_initial(full_name: str) -> Tuple[str, str]:
-    norm = _normalize_text(full_name).replace("-", " ")
+    norm = normalize_text(full_name).replace("-", " ")
     parts = norm.split()
     if not parts:
         return "", ""
@@ -34,11 +28,10 @@ def _side_matches_player(side_text: str, full_name: str) -> bool:
     surname, first_init = _extract_surname_and_initial(full_name)
     if not surname:
         return False
-    norm_side = _normalize_text(side_text).replace("-", " ")
+    norm_side = normalize_text(side_text).replace("-", " ")
     if not re.search(rf"\b{re.escape(surname)}\b", norm_side):
         return False
-    # Si les deux noms de famille peuvent prêter à confusion, l'initiale aide à départager
-    full_norm = _normalize_text(full_name).replace("-", " ")
+    full_norm = normalize_text(full_name).replace("-", " ")
     if full_norm in norm_side:
         return True
     if first_init:
@@ -67,7 +60,7 @@ def _resolve_match_order(
             return False
         return None
 
-    norm_title = _normalize_text(match_title).replace("-", " ")
+    norm_title = normalize_text(match_title).replace("-", " ")
     sur_a, _ = _extract_surname_and_initial(player_a_name)
     sur_b, _ = _extract_surname_and_initial(player_b_name)
     if not sur_a or not sur_b or sur_a == sur_b:
@@ -86,7 +79,7 @@ async def fetch_odds(
     timeout_seconds: float = ODDS_TIMEOUT_SECONDS,
 ) -> str:
     """Télécharge la page de recherche OddsPortal pour un joueur."""
-    clean_query = _normalize_text(player)
+    clean_query = normalize_text(player)
     if not clean_query:
         return ""
     encoded = quote(clean_query, safe="")
@@ -103,25 +96,31 @@ async def fetch_odds(
 
 
 def _is_finished_chunk(chunk: str) -> bool:
-    """Détecte si un bloc événement JSON correspond à un match déjà terminé."""
+    """Détecte si un bloc événement correspond à un match déjà terminé ou live."""
     low = chunk.lower()
     return (
         '"isfinished":true' in low
         or '&quot;isfinished&quot;:true' in low
         or '"status":"finished"' in low
         or '&quot;status&quot;:&quot;finished&quot;' in low
+        or '"islive":true' in low
+        or '&quot;islive&quot;:true' in low
     )
 
 
+def _has_json_events(text: str) -> bool:
+    return bool(text and _JSON_EVENT_RE.search(text))
+
+
 def _extract_json_events(text: str) -> List[Tuple[str, str, str]]:
-    """Extrait les événements (titre, cote1, cote2) non terminés depuis le JSON intégré."""
+    """Extrait les événements (titre, cote1, cote2) pré-match depuis le JSON intégré."""
     events: List[Tuple[str, str, str]] = []
     chunks = re.split(rf"(?={_Q}home-name{_Q})", text)
     pat_home = rf"{_Q}home-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
     pat_away = rf"{_Q}away-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
 
     for chunk in chunks[1:]:
-        if _is_finished_chunk(chunk[:1500]):
+        if _is_finished_chunk(chunk[:2500]):
             continue
         home = re.search(pat_home, chunk)
         away = re.search(pat_away, chunk)
@@ -137,13 +136,6 @@ def _extract_json_events(text: str) -> List[Tuple[str, str, str]]:
 
 
 def _extract_match_name(text: str) -> Optional[str]:
-    pat_home = rf"{_Q}home-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
-    pat_away = rf"{_Q}away-name{_Q}:{_Q}([^{{\}}\"\\]+){_Q}"
-    home = re.search(pat_home, text)
-    away = re.search(pat_away, text)
-    if home and away:
-        return f"{home.group(1)} - {away.group(1)}"
-
     pat_name = rf"{_Q}name{_Q}:{_Q}([A-Z][^{{\}}\"\\]*?\s*-\s*[^{{\}}\"\\]+?){_Q}"
     match_name = re.search(pat_name, text)
     if match_name:
@@ -163,12 +155,15 @@ def _extract_odds_values(text: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Extrait l'intitulé du match simple à venir et les deux cotes."""
+    """Extrait l'intitulé du match simple à venir et les deux cotes (jamais de match terminé)."""
     if not text:
         return None, None, None
-    events = _extract_json_events(text)
-    if events:
-        return events[0]
+    if _has_json_events(text):
+        events = _extract_json_events(text)
+        return events[0] if events else (None, None, None)
+
+    if _is_finished_chunk(text):
+        return None, None, None
     name = _extract_match_name(text)
     if name and "/" in name:
         return None, None, None
@@ -177,12 +172,15 @@ def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]
 
 
 def _html_contains_pair(html: str, player1_name: str, player2_name: str) -> bool:
-    """Vérifie qu'un HTML OddsPortal contient bien le match exact entre les deux joueurs."""
+    """Vérifie qu'un HTML OddsPortal contient bien le match pré-match exact entre les deux joueurs."""
     if not html:
         return False
-    for title, odds1, odds2 in _extract_json_events(html):
-        if odds1 and odds2 and _resolve_match_order(title, player1_name, player2_name) is not None:
-            return True
+    if _has_json_events(html):
+        for title, odds1, odds2 in _extract_json_events(html):
+            if odds1 and odds2 and _resolve_match_order(title, player1_name, player2_name) is not None:
+                return True
+        return False
+
     name, odds1, odds2 = extract_data(html)
     if name and odds1 and odds2:
         return _resolve_match_order(name, player1_name, player2_name) is not None
@@ -217,14 +215,16 @@ def _update_odds_indices(match: MatchAnalysisData) -> None:
 
 
 def process_odds(html: str, match: MatchAnalysisData) -> bool:
-    """Parse et applique les cotes bookmakers au match si valides."""
+    """Parse et applique les cotes bookmakers au match si valides et non terminées."""
     if not html:
         return False
 
-    for title, odds1, odds2 in _extract_json_events(html):
-        if _assign_player_odds(title, (float(odds1), float(odds2)), match):
-            _update_odds_indices(match)
-            return True
+    if _has_json_events(html):
+        for title, odds1, odds2 in _extract_json_events(html):
+            if _assign_player_odds(title, (float(odds1), float(odds2)), match):
+                _update_odds_indices(match)
+                return True
+        return False
 
     name, odds1, odds2 = extract_data(html)
     if not (name and odds1 and odds2):
@@ -244,7 +244,7 @@ async def fetch_both_odds(
     html1 = await fetch_odds(session, surname_1)
     if _html_contains_pair(html1, player1_name, player2_name):
         return html1, ""
-    if _normalize_text(surname_2) == _normalize_text(surname_1):
+    if normalize_text(surname_2) == normalize_text(surname_1):
         return html1, ""
     html2 = await fetch_odds(session, surname_2)
     return html1, html2

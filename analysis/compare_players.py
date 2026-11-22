@@ -4,7 +4,7 @@ import json
 import logging
 from math import ceil, floor
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 from core.models import MatchAnalysisData
 from utils.helpers import normalize_surface
 
@@ -21,8 +21,8 @@ _MIN_PROB = 0.02
 _MAX_PROB = 0.98
 
 
-def _is_calibration_healthy(entry: Dict[str, Any]) -> bool:
-    """Vérifie qu'une calibration enregistrée n'a pas dégradé le Brier Score."""
+def _is_calibration_healthy(entry: Dict[str, Any], as_of_date: Optional[str] = None) -> bool:
+    """Vérifie qu'une calibration améliore le Brier Score et ne fuit pas le futur."""
     if entry.get("accepted") is False:
         return False
     b_before = entry.get("brier_before")
@@ -33,10 +33,17 @@ def _is_calibration_healthy(entry: Dict[str, Any]) -> bool:
                 return False
         except (ValueError, TypeError):
             return False
+
+    if as_of_date:
+        trained_until = entry.get("trained_until")
+        if not trained_until or str(trained_until) >= str(as_of_date):
+            return False
     return True
 
 
-def _load_surface_weights(surface: str) -> Dict[str, float]:
+def _load_surface_weights(
+    surface: str, as_of_date: Optional[str] = None
+) -> Dict[str, float]:
     bucket = normalize_surface(surface)
     if os.path.exists(CALIBRATED_WEIGHTS_PATH):
         try:
@@ -44,17 +51,18 @@ def _load_surface_weights(surface: str) -> Dict[str, float]:
                 data = json.load(f_in)
             entry = data.get(bucket)
             if isinstance(entry, dict):
-                if _is_calibration_healthy(entry):
+                if _is_calibration_healthy(entry, as_of_date=as_of_date):
                     return {**_DEFAULT_WEIGHTS[bucket], **entry}
-                logger.warning(
-                    "Calibration '%s' ignorée (Brier dégradé : %s -> %s), repli sur défauts.",
-                    bucket,
-                    entry.get("brier_before"),
-                    entry.get("brier_after"),
-                )
+                if not as_of_date:
+                    logger.warning(
+                        "Calibration '%s' ignorée (Brier dégradé ou rejeté : %s -> %s), repli sur défauts.",
+                        bucket,
+                        entry.get("brier_before"),
+                        entry.get("brier_after"),
+                    )
         except (OSError, ValueError, TypeError):
             pass
-    return _DEFAULT_WEIGHTS[bucket]
+    return dict(_DEFAULT_WEIGHTS[bucket])
 
 
 def _score_diff(diff: float, step: float = 1.0, use_floor: bool = False) -> Tuple[float, float]:
@@ -79,57 +87,109 @@ def _score_binary(
     return (weight, 0.0) if a_wins else (0.0, weight)
 
 
-def _compute_odds_pair(
-    score_a: float, score_b: float, trj: float = 0.90
-) -> Tuple[float, float]:
-    """Convertit deux scores en paire de cotes finies, positives et cohérentes avec le TRJ."""
-    safe_a = max(0.0, float(score_a))
-    safe_b = max(0.0, float(score_b))
-    total = safe_a + safe_b
-    if total <= 0.0:
-        balanced = round(2.0 * trj, 2)
-        return balanced, balanced
+def extract_scoring_components(match: MatchAnalysisData) -> Tuple[float, ...]:
+    """Décompose un match en composantes linéaires exactes de compare_players().
 
-    prob_a = min(max(safe_a / total, _MIN_PROB), _MAX_PROB)
-    prob_b = 1.0 - prob_a
-    return round(trj / prob_a, 2), round(trj / prob_b, 2)
-
-
-def compare_players(match: MatchAnalysisData) -> MatchAnalysisData:
-    """Calcule les cotes théoriques sur MatchAnalysisData."""
+    Retourne (fixed_a, fixed_b, rank_a, rank_b, form_a, form_b, surf_a, surf_b, elo_a, elo_b).
+    """
     pa, pb = match.player_a, match.player_b
     h2h = match.h2h
-    weights = _load_surface_weights(match.surface)
-    w_form = weights["form"]
-    w_surf = weights["surface"]
 
-    comparisons = [
-        _score_diff(pb.ranking - pa.ranking, step=weights["rank"], use_floor=True),
+    rank_a, rank_b = _score_diff(pb.ranking - pa.ranking, step=1.0, use_floor=True)
+
+    form_parts = [
+        _score_binary(pa.win_pct_last_10, pb.win_pct_last_10, 0.5),
+        _score_binary(pa.win_pct_last_50, pb.win_pct_last_50, 1.0),
+        _score_binary(pa.win_pct_1y, pb.win_pct_1y, 1.0),
+        _score_binary(pa.win_pct_career, pb.win_pct_career, 1.0),
+    ]
+    form_a = sum(p[0] for p in form_parts)
+    form_b = sum(p[1] for p in form_parts)
+
+    surf_parts = [
+        _score_binary(pa.win_pct_1y_surface, pb.win_pct_1y_surface, 2.0 / 3.0),
+        _score_binary(pa.win_pct_career_surface, pb.win_pct_career_surface, 1.0),
+    ]
+    surf_a = sum(p[0] for p in surf_parts)
+    surf_b = sum(p[1] for p in surf_parts)
+
+    fixed_parts = [
         _score_diff(h2h.all_time[0] - h2h.all_time[1], step=1.0),
         _score_diff(h2h.last_year[0] - h2h.last_year[1], step=3.0),
         _score_diff(h2h.surface[0] - h2h.surface[1], step=5.0),
         _score_diff(h2h.games[0] - h2h.games[1], step=5.0),
-        _score_binary(pa.win_pct_last_10, pb.win_pct_last_10, w_form * 0.5),
-        _score_binary(pa.win_pct_last_50, pb.win_pct_last_50, w_form),
-        _score_binary(pa.win_pct_1y, pb.win_pct_1y, w_form),
-        _score_binary(pa.win_pct_career, pb.win_pct_career, w_form),
-        _score_binary(pa.win_pct_1y_surface, pb.win_pct_1y_surface, w_surf * (2.0 / 3.0)),
-        _score_binary(pa.win_pct_career_surface, pb.win_pct_career_surface, w_surf),
         _score_binary(pa.matches_last_month, pb.matches_last_month, 10.0, invert=True),
         _score_binary(pa.tournament_minutes, pb.tournament_minutes, 10.0, invert=True),
         _score_binary(pa.first_serve_pct, pb.first_serve_pct, 20.0),
         _score_binary(pa.first_serve_pts_won, pb.first_serve_pts_won, 20.0),
         _score_binary(pa.break_points_saved_pct, pb.break_points_saved_pct, 20.0),
     ]
+    fixed_a = sum(p[0] for p in fixed_parts) + pa.odds_spread * 5.0
+    fixed_b = sum(p[1] for p in fixed_parts) + pb.odds_spread * 5.0
 
-    elo_bonus_a = (
-        max(0.0, (pa.elo - pb.elo) * weights["elo"]) if (pa.elo > 0 and pb.elo > 0) else 0.0
-    )
-    elo_bonus_b = (
-        max(0.0, (pb.elo - pa.elo) * weights["elo"]) if (pa.elo > 0 and pb.elo > 0) else 0.0
-    )
+    elo_a = max(0.0, pa.elo - pb.elo) if (pa.elo > 0 and pb.elo > 0) else 0.0
+    elo_b = max(0.0, pb.elo - pa.elo) if (pa.elo > 0 and pb.elo > 0) else 0.0
 
-    score_a = sum(c[0] for c in comparisons) + pa.odds_spread * 5.0 + elo_bonus_a
-    score_b = sum(c[1] for c in comparisons) + pb.odds_spread * 5.0 + elo_bonus_b
-    pa.model_odds, pb.model_odds = _compute_odds_pair(score_a, score_b, trj=weights["trj"])
+    return (fixed_a, fixed_b, rank_a, rank_b, form_a, form_b, surf_a, surf_b, elo_a, elo_b)
+
+
+def _scores_to_prob_pair(score_a: float, score_b: float) -> Tuple[float, float]:
+    safe_a = max(0.0, float(score_a))
+    safe_b = max(0.0, float(score_b))
+    total = safe_a + safe_b
+    if total <= 0.0:
+        return 0.5, 0.5
+    prob_a = min(max(safe_a / total, _MIN_PROB), _MAX_PROB)
+    return prob_a, 1.0 - prob_a
+
+
+def _compute_odds_pair(
+    score_a: float, score_b: float, trj: float = 0.90
+) -> Tuple[float, float]:
+    """Convertit deux scores en paire de cotes finies, positives et cohérentes avec le TRJ."""
+    prob_a, prob_b = _scores_to_prob_pair(score_a, score_b)
+    return round(trj / prob_a, 2), round(trj / prob_b, 2)
+
+
+def compare_players(
+    match: MatchAnalysisData,
+    weights_override: Optional[Dict[str, float]] = None,
+    as_of_date: Optional[str] = None,
+) -> MatchAnalysisData:
+    """Calcule les cotes théoriques sur MatchAnalysisData."""
+    weights = (
+        weights_override
+        if weights_override is not None
+        else _load_surface_weights(match.surface, as_of_date=as_of_date)
+    )
+    (
+        fixed_a,
+        fixed_b,
+        rank_a,
+        rank_b,
+        form_a,
+        form_b,
+        surf_a,
+        surf_b,
+        elo_a,
+        elo_b,
+    ) = extract_scoring_components(match)
+
+    score_a = (
+        fixed_a
+        + weights["rank"] * rank_a
+        + weights["form"] * form_a
+        + weights["surface"] * surf_a
+        + weights["elo"] * elo_a
+    )
+    score_b = (
+        fixed_b
+        + weights["rank"] * rank_b
+        + weights["form"] * form_b
+        + weights["surface"] * surf_b
+        + weights["elo"] * elo_b
+    )
+    match.player_a.model_odds, match.player_b.model_odds = _compute_odds_pair(
+        score_a, score_b, trj=weights["trj"]
+    )
     return match

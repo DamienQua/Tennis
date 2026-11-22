@@ -1,16 +1,19 @@
-"""Notification quotidienne par e-mail HTML avec pièce jointe Excel."""
+"""Notification quotidienne par e-mail HTML avec pièce jointe Excel et TLS vérifié."""
 
 from datetime import datetime
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import html
+import logging
 import os
 import smtplib
 import socket
+import ssl
 from typing import Any, Dict, List, Optional
 from dotenv import dotenv_values
 
+logger = logging.getLogger(__name__)
 DEFAULT_TRACKING_FILE = "Paris_Alpha_5_Plus.xlsx"
 
 
@@ -138,12 +141,13 @@ def _attach_excel(msg: MIMEMultipart, filepath: str) -> None:
             part["Content-Disposition"] = f'attachment; filename="{os.path.basename(filepath)}"'
             msg.attach(part)
     except OSError as err:
-        print(f"Impossible d'attacher le fichier Excel {filepath}: {err}")
+        logger.warning("Impossible d'attacher le fichier Excel %s : %s", filepath, err)
 
 
 def _dispatch_smtp(cfg: Dict[str, str], msg: MIMEMultipart) -> None:
+    tls_context = ssl.create_default_context()
     with smtplib.SMTP(cfg["host"], int(cfg["port"]), timeout=15) as server:
-        server.starttls()
+        server.starttls(context=tls_context)
         server.login(cfg["user"], cfg["password"])
         server.send_message(msg)
 
@@ -157,7 +161,7 @@ def send_daily_email(
     """Construit et envoie le rapport quotidien par e-mail."""
     cfg = config or _load_smtp_config()
     if not _is_config_valid(cfg):
-        print("Identifiants email non configurés (SMTP_USER/SMTP_PASSWORD). Envoi ignoré.")
+        logger.info("Identifiants email non configurés (SMTP_USER/SMTP_PASSWORD). Envoi ignoré.")
         return False
 
     date_str = datetime.now().strftime("%d/%m/%Y")
@@ -170,8 +174,8 @@ def send_daily_email(
 
     try:
         _dispatch_smtp(cfg, msg)
-        print(f"Email récapitulatif envoyé avec succès à {cfg['recipient']}")
+        logger.info("Email récapitulatif envoyé avec succès à %s", cfg["recipient"])
         return True
-    except (smtplib.SMTPException, socket.error, OSError, TimeoutError) as err:
-        print(f"Erreur lors de l'envoi de l'email : {err}")
+    except (smtplib.SMTPException, ssl.SSLError, socket.error, OSError, TimeoutError) as err:
+        logger.error("Erreur lors de l'envoi de l'email : %s", err)
         return False

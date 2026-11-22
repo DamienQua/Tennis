@@ -1,4 +1,4 @@
-"""Utilitaires partagés : parsing, normalisation texte/surface, dates et retries HTTP."""
+"""Utilitaires partagés : parsing, normalisation texte/surface/URL, dates et retries HTTP."""
 
 import asyncio
 from datetime import datetime
@@ -22,6 +22,7 @@ _EN_MONTHS = {
     "dec": 12,
 }
 _EN_DATE_RE = re.compile(r"^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$")
+_MATCH_ID_RE = re.compile(r"/match/(\d+)(?:/|$)")
 _CHAR_TRANSLATION = str.maketrans({
     "ł": "l",
     "Ł": "l",
@@ -71,6 +72,17 @@ def normalize_text(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", translated)
     stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return re.sub(r"\s+", " ", stripped).strip().lower()
+
+
+def canonicalize_match_url(match_url: str) -> str:
+    """Supprime les espaces et la barre finale '/' pour une déduplication stable."""
+    return (match_url or "").strip().rstrip("/")
+
+
+def extract_match_id(match_url: str) -> str:
+    """Extrait l'identifiant numérique TennisInsight depuis une URL de match."""
+    match = _MATCH_ID_RE.search(match_url or "")
+    return match.group(1) if match else ""
 
 
 async def fetch_with_retry(

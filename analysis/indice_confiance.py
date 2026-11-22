@@ -138,7 +138,7 @@ class TacticsAnalyzer:
                 (flat_stats[i], flat_stats[i + 1]) for i in range(0, len(flat_stats), 2)
             ]
             self.confidence.tiebreak_pair = (
-                self.stats_analyzer.calculate_tiebreak_stats(stats_match)
+                self.stats_analyzer.calculate_tiebreak_stats(stats_match, flag)
             )
         except (IndexError, ValueError, AttributeError, TypeError, KeyError) as err:
             logger.debug("Stats tactiques indisponibles pour %s : %s", match_url, err)

@@ -19,6 +19,8 @@ class TestGenerateXlsx(unittest.TestCase):
                 model_odds=1.25,
                 book_odds=1.50,
                 elo=2150.0,
+                win_pct_career=82.0,
+                win_pct_career_surface=84.0,
             ),
             player_b=PlayerStats(
                 name="Fabio Fognini",
@@ -26,6 +28,8 @@ class TestGenerateXlsx(unittest.TestCase):
                 model_odds=4.50,
                 book_odds=2.80,
                 elo=1900.0,
+                win_pct_career=54.0,
+                win_pct_career_surface=58.0,
             ),
         )
         rows = _prepare_match_data(match)
@@ -40,10 +44,18 @@ class TestGenerateXlsx(unittest.TestCase):
             tournament="Roland Garros 2026",
             surface="Clay",
             player_a=PlayerStats(
-                name="Player 1", model_odds=1.80, book_odds=1.75, elo=1900.0
+                name="Player 1",
+                model_odds=1.80,
+                book_odds=1.75,
+                elo=1900.0,
+                win_pct_career=60.0,
             ),
             player_b=PlayerStats(
-                name="Player 2", model_odds=1.90, book_odds=1.95, elo=1880.0
+                name="Player 2",
+                model_odds=1.90,
+                book_odds=1.95,
+                elo=1880.0,
+                win_pct_career=58.0,
             ),
         )
         rows = _prepare_match_data(match)

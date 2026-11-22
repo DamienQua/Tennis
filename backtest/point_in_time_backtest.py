@@ -22,11 +22,13 @@ class PointInTimeBacktester:
         evaluator: Optional[StrategyEvaluator] = None,
         output_dir: str = "backtest/results",
         strategy_mode: str = "alpha_5_plus",
+        weights_override: Optional[Dict[str, float]] = None,
     ) -> None:
         self.data_dir = data_dir
         self.evaluator = evaluator or StrategyEvaluator()
         self.output_dir = output_dir
         self.strategy_mode = strategy_mode
+        self.weights_override = weights_override
         os.makedirs(self.output_dir, exist_ok=True)
         self.records: List[Dict[str, Any]] = []
 
@@ -40,9 +42,7 @@ class PointInTimeBacktester:
             return pd.DataFrame()
         combined = pd.concat(dfs, ignore_index=True)
         combined["Date"] = pd.to_datetime(combined["Date"])
-        combined.sort_values("Date", inplace=True)
-        combined.reset_index(drop=True, inplace=True)
-        return combined
+        return combined.sort_values("Date").reset_index(drop=True)
 
     def run_backtest_for_year(
         self, year: int, gender: str, elo_data: str = ""
@@ -125,6 +125,7 @@ class PointInTimeBacktester:
                 win_pct_1y_surface=prof_w["win_pct_1y_surface"],
                 win_pct_career_surface=prof_w["win_pct_career_surface"],
                 matches_last_month=int(prof_w["matches_last_month"]),
+                data_sources={"point_in_time"},
             ),
             player_b=PlayerStats(
                 name=p_l,
@@ -138,10 +139,16 @@ class PointInTimeBacktester:
                 win_pct_1y_surface=prof_l["win_pct_1y_surface"],
                 win_pct_career_surface=prof_l["win_pct_career_surface"],
                 matches_last_month=int(prof_l["matches_last_month"]),
+                data_sources={"point_in_time"},
             ),
             h2h=h2h,
         )
-        compare_players(match_obj)
+        # Passe as_of_date pour interdire toute fuite depuis calibrated_weights.json futur
+        compare_players(
+            match_obj,
+            weights_override=self.weights_override,
+            as_of_date=match_date.strftime("%Y-%m-%d"),
+        )
         return match_obj, match_date
 
     def _evaluate_match(self, match_obj: MatchAnalysisData) -> Tuple[str, Any]:

@@ -70,6 +70,8 @@ class BacktestEngine:
             "surface_b": get_arg(args, 9, kwargs.get("surface_b", 0.0)),
             "year": get_arg(args, 10, kwargs.get("year", 2023)),
             "gender": get_arg(args, 11, kwargs.get("gender", "atp")),
+            "match_date": kwargs.get("match_date"),
+            "round_name": kwargs.get("round_name"),
         }
 
     @staticmethod
@@ -148,10 +150,16 @@ class BacktestEngine:
         return BacktestResult(params["match_url"], match_info, bets)
 
     def process_match_result(self, *args, **kwargs) -> Optional[BacktestResult]:
-        """Injecte les cotes historiques, évalue la stratégie et enregistre le résultat."""
+        """Injecte les cotes historiques (désambiguïsées par tournoi/date) et évalue la stratégie."""
         params = self._parse_match_params(args, kwargs)
         hist = self.odds_provider.get_match_odds(
-            params["player_a"], params["player_b"], params["year"], params["gender"]
+            params["player_a"],
+            params["player_b"],
+            params["year"],
+            params["gender"],
+            tournament=params["tournament"],
+            match_date=params["match_date"],
+            round_name=params["round_name"],
         )
         if not hist:
             return None

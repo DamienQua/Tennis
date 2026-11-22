@@ -3,15 +3,14 @@
 from contextlib import contextmanager
 from datetime import datetime
 import os
-import re
 import sqlite3
-from typing import Any, Dict, Iterator, List, Set
-import unicodedata
+from typing import Any, Dict, Iterator, List, Optional, Set
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from core.models import MatchAnalysisData
 from core.player_extractor import PlayerExtractor
+from utils.helpers import canonicalize_match_url, extract_match_id, normalize_text, safe_float
 
 DB_FILE = "tennis_ai.db"
 SQL_DUMP_FILE = "tennis_ai_dump.sql"
@@ -40,21 +39,9 @@ EXCEL_HEADERS = [
 ]
 
 
-def _to_float(val: str) -> float:
-    cleaned = val.strip()
-    if not cleaned:
-        return 0.0
-    try:
-        return float(cleaned)
-    except ValueError:
-        return 0.0
-
-
 def _normalize_player_name(name: str) -> str:
     alias = PlayerExtractor.PLAYER_ALIASES.get((name or "").strip(), (name or "").strip())
-    decomposed = unicodedata.normalize("NFKD", alias)
-    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return re.sub(r"\s+", " ", stripped).strip().lower()
+    return normalize_text(alias)
 
 
 def _winner_matches(selected_player: str, winner_name: str) -> bool:
@@ -75,9 +62,21 @@ def _winner_matches(selected_player: str, winner_name: str) -> bool:
 class TennisDatabase:
     """Gère le stockage SQLite (mode WAL), le dump SQL Git, la CLV et l'export Excel."""
 
-    def __init__(self, db_path: str = DB_FILE, dump_path: str = SQL_DUMP_FILE) -> None:
+    def __init__(
+        self,
+        db_path: str = DB_FILE,
+        dump_path: Optional[str] = None,
+    ) -> None:
         self.db_path = db_path
-        self.dump_path = dump_path
+        self._is_default_db = os.path.abspath(db_path) == os.path.abspath(DB_FILE)
+        # Une base personnalisée (ex: test isolé) ne restaure jamais implicitement le dump de prod
+        if dump_path is not None:
+            self.dump_path = dump_path
+        elif self._is_default_db:
+            self.dump_path = SQL_DUMP_FILE
+        else:
+            self.dump_path = ""
+
         self._restore_from_dump_if_needed()
         self._init_schema()
 
@@ -102,8 +101,8 @@ class TennisDatabase:
             conn.close()
 
     def _restore_from_dump_if_needed(self) -> None:
-        """Reconstruit la base SQLite depuis le dump texte si le .db est absent."""
-        if os.path.exists(self.db_path) or not os.path.exists(self.dump_path):
+        """Reconstruit la base SQLite depuis le dump texte si configuré et le .db absent."""
+        if not self.dump_path or os.path.exists(self.db_path) or not os.path.exists(self.dump_path):
             return
         with open(self.dump_path, "r", encoding="utf-8") as f_dump:
             sql_script = f_dump.read()
@@ -118,7 +117,7 @@ class TennisDatabase:
 
     def export_sql_dump(self, dump_path: str = "") -> str:
         """Exporte la base SQLite en fichier texte SQL léger pour Git."""
-        target = dump_path or self.dump_path
+        target = dump_path or self.dump_path or f"{os.path.splitext(self.db_path)[0]}_dump.sql"
         with self._session() as conn:
             lines = list(conn.iterdump())
         with open(target, "w", encoding="utf-8", newline="\n") as f_out:
@@ -170,7 +169,8 @@ class TennisDatabase:
                 """
             )
             self._migrate_bets_columns(conn)
-            self._import_legacy_reviewed(conn)
+            if self._is_default_db:
+                self._import_legacy_reviewed(conn)
 
     @staticmethod
     def _migrate_bets_columns(conn: sqlite3.Connection) -> None:
@@ -187,7 +187,7 @@ class TennisDatabase:
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < 16 or not parts[-1].startswith("http"):
             return None
-        match_url = parts[-1]
+        match_url = canonicalize_match_url(parts[-1])
         summary_line = ", ".join(parts[:-1])
         return (
             match_url,
@@ -196,13 +196,13 @@ class TennisDatabase:
             parts[1],
             parts[2],
             parts[3],
-            _to_float(parts[4]),
-            _to_float(parts[5]),
-            _to_float(parts[6]),
-            _to_float(parts[7]),
-            _to_float(parts[8]),
-            _to_float(parts[9]),
-            _to_float(parts[12]),
+            safe_float(parts[4]),
+            safe_float(parts[5]),
+            safe_float(parts[6]),
+            safe_float(parts[7]),
+            safe_float(parts[8]),
+            safe_float(parts[9]),
+            safe_float(parts[12]),
             summary_line,
         )
 
@@ -235,26 +235,41 @@ class TennisDatabase:
                 rows_to_insert,
             )
 
+    @staticmethod
+    def _row_exists_in_table(conn: sqlite3.Connection, table: str, match_url: str) -> bool:
+        canon = canonicalize_match_url(match_url)
+        row = conn.execute(
+            f"SELECT 1 FROM {table} WHERE rtrim(match_url, '/') = ? LIMIT 1",
+            (canon,),
+        ).fetchone()
+        if row is not None:
+            return True
+        match_id = extract_match_id(canon)
+        if match_id:
+            row_id = conn.execute(
+                f"SELECT 1 FROM {table} WHERE match_url LIKE ? OR match_url LIKE ? LIMIT 1",
+                (f"%/match/{match_id}/%", f"%/match/{match_id}"),
+            ).fetchone()
+            return row_id is not None
+        return False
+
     def is_match_analyzed(self, match_url: str) -> bool:
         with self._session() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM matches WHERE match_url = ? LIMIT 1",
-                (match_url.strip(),),
-            ).fetchone()
-            return row is not None
+            return self._row_exists_in_table(conn, "matches", match_url)
 
     def load_reviewed_urls(self) -> Set[str]:
         with self._session() as conn:
             rows = conn.execute("SELECT match_url FROM matches").fetchall()
-            return {row["match_url"] for row in rows}
+            return {canonicalize_match_url(row["match_url"]) for row in rows}
 
     def save_match(self, match: MatchAnalysisData, daily_file: str = "Matchs.txt") -> bool:
-        if self.is_match_analyzed(match.match_url):
-            return False
-
+        canon_url = canonicalize_match_url(match.match_url)
         pa, pb = match.player_a, match.player_b
         summary = match.to_summary_line()
+
         with self._session() as conn:
+            if self._row_exists_in_table(conn, "matches", canon_url):
+                return False
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO matches (
@@ -264,7 +279,7 @@ class TennisDatabase:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    match.match_url.strip(),
+                    canon_url,
                     datetime.now().isoformat(timespec="seconds"),
                     match.tournament,
                     match.surface,
@@ -284,14 +299,17 @@ class TennisDatabase:
 
         if inserted:
             with open(daily_file, "a", encoding="utf-8") as f_daily:
-                f_daily.write(f"{summary}, {match.match_url}\n")
+                f_daily.write(f"{summary}, {canon_url}\n")
         return inserted
 
     def save_bet(self, match: MatchAnalysisData, alpha_res: Dict[str, Any]) -> bool:
         if not alpha_res.get("bet_recommended"):
             return False
+        canon_url = canonicalize_match_url(match.match_url)
         book_odds = alpha_res["book_odds"]
         with self._session() as conn:
+            if self._row_exists_in_table(conn, "bets", canon_url):
+                return False
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO bets (
@@ -301,7 +319,7 @@ class TennisDatabase:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    match.match_url.strip(),
+                    canon_url,
                     datetime.now().strftime("%d/%m/%Y %H:%M"),
                     match.tournament,
                     match.surface,
@@ -323,17 +341,18 @@ class TennisDatabase:
     def update_closing_odds(self, match_url: str, closing_odds: float) -> None:
         if closing_odds <= 1.0:
             return
+        canon = canonicalize_match_url(match_url)
         with self._session() as conn:
             row = conn.execute(
-                "SELECT book_odds FROM bets WHERE match_url = ? AND status = 'En attente'",
-                (match_url,),
+                "SELECT id, book_odds FROM bets WHERE rtrim(match_url, '/') = ? AND status = 'En attente'",
+                (canon,),
             ).fetchone()
             if not row or row["book_odds"] <= 1.0:
                 return
             clv_pct = round(((row["book_odds"] / closing_odds) - 1.0) * 100.0, 2)
             conn.execute(
-                "UPDATE bets SET closing_odds = ?, clv_percent = ? WHERE match_url = ?",
-                (closing_odds, clv_pct, match_url),
+                "UPDATE bets SET closing_odds = ?, clv_percent = ? WHERE id = ?",
+                (closing_odds, clv_pct, row["id"]),
             )
 
     def get_pending_bets(self) -> List[Dict[str, Any]]:
@@ -346,10 +365,11 @@ class TennisDatabase:
     def settle_bet(
         self, match_url: str, winner_name: str, is_void: bool = False
     ) -> None:
+        canon = canonicalize_match_url(match_url)
         with self._session() as conn:
             row = conn.execute(
-                "SELECT selected_player, book_odds, kelly_stake_pct FROM bets WHERE match_url = ?",
-                (match_url,),
+                "SELECT id, selected_player, book_odds, kelly_stake_pct FROM bets WHERE rtrim(match_url, '/') = ?",
+                (canon,),
             ).fetchone()
             if not row:
                 return
@@ -366,8 +386,8 @@ class TennisDatabase:
                 )
 
             conn.execute(
-                "UPDATE bets SET status = ?, winner = ?, profit_units = ? WHERE match_url = ?",
-                (status, winner_name, profit, match_url),
+                "UPDATE bets SET status = ?, winner = ?, profit_units = ? WHERE id = ?",
+                (status, winner_name, profit, row["id"]),
             )
 
     def get_roi_summary(self) -> Dict[str, Any]:

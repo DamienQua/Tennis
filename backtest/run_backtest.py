@@ -1,4 +1,4 @@
-"""Script d'exécution de backtests historiques via crawling TennisInsight."""
+"""Script d'exécution de backtests historiques via crawling TennisInsight (ELO historiques)."""
 
 import asyncio
 import os
@@ -9,11 +9,12 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import aiohttp
+import pandas as pd
 from backtest.backtest_engine import BacktestEngine, print_backtest_summary
+from backtest.point_in_time_stats import PointInTimeStats
 from backtest.tournament_crawler import TournamentCrawler
 from core.analyze_match import analyze_match
 from core.models import MatchAnalysisData
-from data_providers.elo_finder import elo_table
 from main import login
 
 os.environ.pop("SSLKEYLOGFILE", None)
@@ -41,6 +42,17 @@ JANUARY_2023_TOURNAMENTS = [
 ]
 
 
+def _load_historical_stats(gender: str, data_dir: str = "backtest/data") -> PointInTimeStats:
+    """Construit un moteur ELO strictement historique depuis les archives locales."""
+    frames = []
+    for year in (2022, 2023, 2024, 2025, 2026):
+        path = os.path.join(data_dir, f"{gender.lower()}_{year}.xlsx")
+        if os.path.exists(path):
+            frames.append(pd.read_excel(path))
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    return PointInTimeStats(combined)
+
+
 def _log_single_match(match_data: MatchAnalysisData, backtest_res: Any, start: float) -> None:
     elapsed = round(time.perf_counter() - start, 2)
     c_val = backtest_res.match_data.get("confluence", "N/A") if backtest_res else "SKIP"
@@ -54,7 +66,7 @@ async def _analyze_single_match(
     session: aiohttp.ClientSession,
     match_url: str,
     tour_name: str,
-    elo_data: str,
+    stats_engine: PointInTimeStats,
     semaphore: asyncio.Semaphore,
     engine: BacktestEngine,
     year: int,
@@ -64,12 +76,28 @@ async def _analyze_single_match(
         try:
             start = time.perf_counter()
             match_data = await analyze_match(
-                session, DEFAULT_HEADERS, match_url, [tour_name], elo_data
-            )
+                            session,
+                            DEFAULT_HEADERS,
+                            match_url,
+                            [tour_name],
+                            elo_data="",
+                            enforce_prematch=False,
+                        )
             if not match_data:
                 return None
 
             pa, pb = match_data.player_a, match_data.player_b
+            hist = engine.odds_provider.get_match_odds(
+                pa.name, pb.name, year, gender, tournament=match_data.tournament
+            )
+            cutoff_date = (
+                pd.to_datetime(hist["date"])
+                if (hist and hist.get("date"))
+                else pd.Timestamp(f"{year}-01-01")
+            )
+            elo_a = stats_engine.get_player_elo_before(pa.name, cutoff_date, match_data.surface)
+            elo_b = stats_engine.get_player_elo_before(pb.name, cutoff_date, match_data.surface)
+
             backtest_res = engine.process_match_result(
                 match_url,
                 pa.name,
@@ -77,12 +105,13 @@ async def _analyze_single_match(
                 match_data.tournament,
                 pa.model_odds,
                 pb.model_odds,
-                elo_a=pa.elo,
-                elo_b=pb.elo,
+                elo_a=elo_a,
+                elo_b=elo_b,
                 surface_a=pa.win_pct_career_surface,
                 surface_b=pb.win_pct_career_surface,
                 year=year,
                 gender=gender,
+                match_date=hist.get("date") if hist else None,
             )
             _log_single_match(match_data, backtest_res, start)
             return backtest_res
@@ -103,7 +132,7 @@ async def _run_matches_batch(
     session: aiohttp.ClientSession,
     matches: List[str],
     tname: str,
-    elo_data: str,
+    stats_engine: PointInTimeStats,
     semaphore: asyncio.Semaphore,
     engine: BacktestEngine,
     year: int = 2023,
@@ -111,7 +140,7 @@ async def _run_matches_batch(
 ) -> None:
     tasks = [
         _analyze_single_match(
-            session, m_url, tname, elo_data, semaphore, engine, year, gender
+            session, m_url, tname, stats_engine, semaphore, engine, year, gender
         )
         for m_url in matches
     ]
@@ -126,26 +155,28 @@ async def run_tournament_backtest(
     max_concurrency: int = 3,
     strategy_mode: str = "alpha_5_plus",
 ) -> Dict[str, Any]:
-    """Exécute le backtest pour un tournoi spécifique."""
+    """Exécute le backtest pour un tournoi spécifique avec ELO historiques."""
     crawler = TournamentCrawler()
     engine = BacktestEngine(output_dir="backtest/results", strategy_mode=strategy_mode)
     semaphore = asyncio.Semaphore(max_concurrency)
+    stats_engine = _load_historical_stats(gender)
 
     async with aiohttp.ClientSession(headers=DEFAULT_HEADERS) as session:
-        elo_data = await elo_table(gender.upper(), session=session)
         await login(session)
         print(f"=== Starting Backtest for: {tournament_name} ({year}) ===")
         matches = await crawler.fetch_tournament_matches(session, tournament_id)
         print(f"Found {len(matches)} matches in tournament.\n")
         await _run_matches_batch(
-            session, matches, tournament_name, elo_data, semaphore, engine, year, gender
+            session, matches, tournament_name, stats_engine, semaphore, engine, year, gender
         )
 
     summary = engine.evaluator.get_summary()
     report_file = f"{tournament_name.replace(' ', '_').lower()}_{year}_backtest.xlsx"
     saved_path = engine.export_summary(report_file)
     print_backtest_summary(
-        summary, len(engine.results), saved_path,
+        summary,
+        len(engine.results),
+        saved_path,
         title=f"BACKTEST SUMMARY: {tournament_name} ({year})",
     )
     return summary
@@ -156,42 +187,41 @@ async def _run_january_tournaments(
     crawler: TournamentCrawler,
     engine: BacktestEngine,
     semaphore: asyncio.Semaphore,
-    elos: Tuple[str, str],
+    stats_engines: Tuple[PointInTimeStats, PointInTimeStats],
 ) -> None:
     for tid, tname, gender in JANUARY_2023_TOURNAMENTS:
         print(f"\n>>> Début analyse : {tname} ({gender.upper()}) <<<")
-        elo_data = elos[0] if gender == "atp" else elos[1]
+        stats_engine = stats_engines[0] if gender == "atp" else stats_engines[1]
         matches = await crawler.fetch_tournament_matches(session, tid)
         print(f"Matchs trouvés : {len(matches)}")
         await _run_matches_batch(
-            session, matches, tname, elo_data, semaphore, engine, year=2023, gender=gender
+            session, matches, tname, stats_engine, semaphore, engine, year=2023, gender=gender
         )
 
 
 async def run_january_2023_backtest(
     max_concurrency: int = 3, strategy_mode: str = "alpha_5_plus"
 ) -> Dict[str, Any]:
-    """Exécute le backtest consolidé sur tous les tournois de janvier 2023."""
+    """Exécute le backtest consolidé sur tous les tournois de janvier 2023 (ELO historiques)."""
     crawler = TournamentCrawler()
     engine = BacktestEngine(output_dir="backtest/results", strategy_mode=strategy_mode)
     semaphore = asyncio.Semaphore(max_concurrency)
+    stats_engines = (_load_historical_stats("atp"), _load_historical_stats("wta"))
 
     async with aiohttp.ClientSession(headers=DEFAULT_HEADERS) as session:
-        elos = await asyncio.gather(
-            elo_table("ATP", session=session),
-            elo_table("WTA", session=session),
-        )
         await login(session)
         print("=" * 60)
         print("LANCEMENT DU BACKTEST CONSOLIDÉ - JANVIER 2023 (ATP & WTA)")
         print(f"Total tournois au programme : {len(JANUARY_2023_TOURNAMENTS)}")
         print("=" * 60 + "\n")
-        await _run_january_tournaments(session, crawler, engine, semaphore, elos)
+        await _run_january_tournaments(session, crawler, engine, semaphore, stats_engines)
 
     summary = engine.evaluator.get_summary()
     saved_path = engine.export_summary("january_2023_consolidated_backtest.xlsx")
     print_backtest_summary(
-        summary, len(engine.results), saved_path,
+        summary,
+        len(engine.results),
+        saved_path,
         title="BILAN CONSOLIDÉ - JANVIER 2023 (ATP & WTA)",
     )
     return summary
