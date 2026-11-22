@@ -1,14 +1,21 @@
 """Extraction et analyse du tableau Head-to-Head (H2H)."""
 
 from dataclasses import dataclass
+import logging
 import re
-from typing import Tuple
+from typing import List, Optional, Tuple
 import aiohttp
 from bs4 import BeautifulSoup
 from analysis.h2h_stats import H2HStats, DateUtils, _matches_player
 from analysis.indice_confiance import indice_confiance
 from core.models import H2HMetrics, MatchAnalysisData
 from utils.helpers import normalize_surface
+
+logger = logging.getLogger(__name__)
+
+_SURFACE_RE = re.compile(r"\b(?:indoor\s+hard|hard|clay|grass|carpet)\b", re.IGNORECASE)
+_SCORE_RE = re.compile(r"(?:\b\d{1,2}-\d{1,2}\b|\bw/o\b|\bwalkover\b|\bret\.)", re.IGNORECASE)
+_DEFEAT_SPLIT_RE = re.compile(r"\s+(?:[Dd]ef\.?|[Dd]efeated|d\.?)(?=\s|$)")
 
 
 @dataclass
@@ -21,12 +28,33 @@ class MatchContext:
     match_id: str
 
 
-def _same_surface(target_surface: str, row_surface: str) -> bool:
+def _same_surface_bucket(target_surface: str, row_surface: str) -> bool:
     if not (target_surface or "").strip() or not (row_surface or "").strip():
         return False
     if "carpet" in target_surface.lower() or "carpet" in row_surface.lower():
         return "carpet" in target_surface.lower() and "carpet" in row_surface.lower()
     return normalize_surface(target_surface) == normalize_surface(row_surface)
+
+
+def _exact_surface_match(target_surface: str, row_surface: str) -> bool:
+    t_low = (target_surface or "").strip().lower()
+    r_low = (row_surface or "").strip().lower()
+    return bool(t_low and r_low and (t_low in r_low or r_low == t_low))
+
+
+def _clean_winner_text(raw_text: str) -> str:
+    no_brackets = re.sub(r"[\(\[].*?[\)\]]", "", raw_text or "")
+    parts = _DEFEAT_SPLIT_RE.split(no_brackets, maxsplit=1)
+    return re.sub(r"\s+", " ", parts[0]).strip()
+
+
+def _extract_match_href(row_elem) -> str:
+    links = row_elem.find_all("a")
+    for link in links:
+        href = link.get("href", "")
+        if "/match/" in href:
+            return href
+    return links[-1].get("href", "") if links else ""
 
 
 class H2HDataProcessor:
@@ -37,9 +65,11 @@ class H2HDataProcessor:
         self.match = match
         self.surface = match.surface
         self.player_a_name = match.player_a.name
+        self.player_b_name = match.player_b.name
         self.stats = H2HStats(match.player_a.name, match.player_b.name)
         self.go_url = ""
         self.flag = 0
+        self._has_exact_surface_url = False
 
     def process(self) -> None:
         """Exécute le comptage et le parsing des confrontations passées."""
@@ -73,39 +103,123 @@ class H2HDataProcessor:
         return res if res else "0-0 0-0"
 
     @classmethod
-    def _extract_match_details(cls, row_elem) -> Tuple[float, str, str, str]:
+    def _extract_from_cells(
+        cls, cells: List[str], player_a: str = "", player_b: str = ""
+    ) -> Tuple[float, str, str, str]:
+        date_ms = 0.0
+        date_idx: Optional[int] = None
+        for idx, txt in enumerate(cells):
+            parsed = DateUtils.parse_date(txt)
+            if parsed > 0.0:
+                date_ms = parsed
+                date_idx = idx
+                break
+
+        surface_m = ""
+        surf_idx: Optional[int] = None
+        for idx, txt in enumerate(cells):
+            if idx == date_idx:
+                continue
+            surf_match = _SURFACE_RE.search(txt)
+            if surf_match:
+                surface_m = surf_match.group(0).strip()
+                surf_idx = idx
+                break
+
+        score = "0-0 0-0"
+        score_idx: Optional[int] = None
+        for idx in range(len(cells) - 1, -1, -1):
+            if idx in (date_idx, surf_idx):
+                continue
+            if _SCORE_RE.search(cells[idx]):
+                score = cls._parse_row_score(cells[idx])
+                score_idx = idx
+                break
+
+        winner = ""
+        used = {date_idx, surf_idx, score_idx}
+        for idx, txt in enumerate(cells):
+            if idx in used or not txt:
+                continue
+            if _DEFEAT_SPLIT_RE.search(txt):
+                winner = _clean_winner_text(txt)
+                break
+
+        if not winner and (player_a or player_b):
+            for idx, txt in enumerate(cells):
+                if idx in used or not txt:
+                    continue
+                cleaned = _clean_winner_text(txt)
+                if _matches_player(cleaned, player_a) or _matches_player(cleaned, player_b):
+                    winner = cleaned
+                    break
+
+        if not winner and len(cells) >= 3 and 2 not in used:
+            winner = _clean_winner_text(cells[2])
+
+        return date_ms, surface_m, winner, score
+
+    @classmethod
+    def _extract_match_details(
+        cls, row_elem, player_a: str = "", player_b: str = ""
+    ) -> Tuple[float, str, str, str]:
         """Extrait date, surface, vainqueur et score depuis une ligne <tr>."""
         tds = row_elem.find_all("td")
-        if len(tds) >= 5:
-            date_ms = DateUtils.parse_date(tds[0].text.strip())
-            surface_m = tds[2].text.split(",")[0].strip()
-            raw_winner = tds[3].text.strip()
-            winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
-            score = cls._parse_row_score(tds[4].text.strip())
-            return date_ms, surface_m, winner, score
+        if len(tds) >= 3:
+            cells = [td.get_text(" ", strip=True) for td in tds]
+            return cls._extract_from_cells(cells, player_a=player_a, player_b=player_b)
 
         lines = [line.strip() for line in row_elem.text.strip().split("\n") if line.strip()]
         tab_parts = row_elem.text.strip().split("\t")
         date_ms = DateUtils.parse_date(tab_parts[0].strip()) if tab_parts else 0.0
         surface_m = lines[5].split(",")[0].strip() if len(lines) > 5 else ""
         raw_winner = lines[7].strip() if len(lines) > 7 else ""
-        winner = re.sub(r"[\(\[].*?[\)\]]", "", raw_winner).split("  d")[0].strip()
+        winner = _clean_winner_text(raw_winner)
         raw_score = lines[9].strip() if len(lines) > 9 else ""
         return date_ms, surface_m, winner, cls._parse_row_score(raw_score)
 
     def _update_go_flag(self, row_elem, surface_m: str, winner: str) -> None:
-        if self.go_url == "" and _same_surface(self.surface, surface_m):
-            links = row_elem.find_all("a")
-            if links:
-                self.go_url = links[-1].get("href", "")
-                self.flag = 0 if _matches_player(winner, self.player_a_name) else 1
+        href = _extract_match_href(row_elem)
+        if not href:
+            return
+        is_exact = _exact_surface_match(self.surface, surface_m)
+        if is_exact and not self._has_exact_surface_url:
+            self.go_url = href
+            self.flag = 0 if _matches_player(winner, self.player_a_name) else 1
+            self._has_exact_surface_url = True
+        elif not self.go_url and _same_surface_bucket(self.surface, surface_m):
+            self.go_url = href
+            self.flag = 0 if _matches_player(winner, self.player_a_name) else 1
+
+    def _find_h2h_container(self):
+        if not self.data:
+            return None
+        container = self.data.find(class_="h2h-matches")
+        if container:
+            return container
+        for table in self.data.find_all("table"):
+            classes = " ".join(table.get("class") or []).lower()
+            if "h2h" in classes:
+                return table
+        return None
 
     def _process_h2h_matches(self) -> None:
-        h2h_elem = self.data.find(class_="h2h-matches") if self.data else None
+        h2h_elem = self._find_h2h_container()
         if not h2h_elem:
+            logger.debug(
+                "Tableau H2H introuvable dans le DOM pour %s vs %s",
+                self.player_a_name,
+                self.player_b_name,
+            )
             return
-        for row_elem in h2h_elem.find_all("tr")[1:]:
-            date_ms, surface_m, winner, score = self._extract_match_details(row_elem)
+        for row_elem in h2h_elem.find_all("tr"):
+            if row_elem.find("th"):
+                continue
+            date_ms, surface_m, winner, score = self._extract_match_details(
+                row_elem, player_a=self.player_a_name, player_b=self.player_b_name
+            )
+            if not winner:
+                continue
             self.stats.update_stats(winner, date_ms, surface_m, score, self.surface)
             self._update_go_flag(row_elem, surface_m, winner)
 

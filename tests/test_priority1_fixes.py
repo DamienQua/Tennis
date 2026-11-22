@@ -212,3 +212,51 @@ def test_calibration_handles_nan_ranks_and_preserves_scale(tmp_path):
     res = calibrate_from_dataframe(pd.DataFrame(rows), output_path=out)
     assert res["hard"]["form"] + res["hard"]["surface"] == 50.0
     assert res["hard"]["brier_after"] <= res["hard"]["brier_before"]
+
+def test_h2h_parses_real_tennisinsight_six_column_layout():
+    """Vérifie le parsing du format réel TennisInsight (Date, Tournament+Surface, Players, Result, Odds)."""
+    html = """
+    <div class="h2h-matches">
+      <table>
+        <tr><th>Date</th><th>Tournament</th><th>Players</th><th>Result</th><th>Odds</th><th></th></tr>
+        <tr>
+          <td>Jan 19 2026</td>
+          <td>Australian Open Slam (AUS) Hard Court, SF</td>
+          <td>(1) Alcaraz (1, 3.24) d (3) Zverev (3, 2.03)</td>
+          <td><a href="/match/1001/">6-4 7-6(5) 6-7(3) 6-7(4) 7-5</a></td>
+          <td>$1.193 $5.596</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td>Aug 7 2025</td>
+          <td>Cincinnati TMS (USA) Hard Court, SF</td>
+          <td>(2) Alcaraz (2, 2.87) d (3) Zverev (3, 2.33)</td>
+          <td><a href="/match/1002/">6-4 6-3</a></td>
+          <td>$1.538 $2.727</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td>Nov 11 2024</td>
+          <td>Tennis Masters Cup (ITA) Indoor Hard, RR</td>
+          <td>(2) Zverev (6, 1.90) d (3) Alcaraz (2, 2.12)</td>
+          <td><a href="/match/1003/">7-6(5) 6-4</a></td>
+          <td>$2.004 $1.931</td>
+          <td></td>
+        </tr>
+      </table>
+    </div>
+    """
+    match = MatchAnalysisData(
+        match_url="https://tennisinsight.com/match/260684301/2026-turin-atp-wtf/f/alexander-zverev-vs-carlos-alcaraz/",
+        surface="Indoor Hard",
+        player_a=PlayerStats(name="Alexander Zverev"),
+        player_b=PlayerStats(name="Carlos Alcaraz"),
+    )
+    proc = H2HDataProcessor(BeautifulSoup(html, "lxml"), match)
+    proc.process()
+
+    assert match.h2h.all_time == (33.33, 66.67)
+    assert match.h2h.surface == (100.0, 0.0)
+    assert match.h2h.games == (47.57, 52.43)
+    assert proc.go_url == "/match/1003/"
+    assert proc.flag == 0
