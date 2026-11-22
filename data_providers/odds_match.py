@@ -51,7 +51,7 @@ def _extract_json_events(text: str) -> List[Tuple[str, str, str]]:
         title = f"{home.group(1)} - {away.group(1)}"
         if "/" in title:
             continue
-        odds1, odds2 = _extract_odds_values(chunk[:2500])
+        odds1, odds2 = _extract_odds_values(chunk[:8000])
         if odds1 and odds2:
             events.append((title, odds1, odds2))
     return events
