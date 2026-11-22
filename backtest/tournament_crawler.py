@@ -4,7 +4,7 @@ Tournament crawler for discovering and retrieving historical tennis matches.
 Fetches historical tournaments and their matches from TennisInsight via AJAX endpoints.
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict
 from bs4 import BeautifulSoup
 import aiohttp
 

@@ -3,19 +3,98 @@
 import asyncio
 import re
 from typing import List, Optional, Tuple
+import unicodedata
+from urllib.parse import quote
 import aiohttp
 from core.models import MatchAnalysisData
 
 _Q = r'(?:&quot;|\\"|")'
+ODDS_TIMEOUT_SECONDS = 6.0
 
 
-async def fetch_odds(session: aiohttp.ClientSession, player: str) -> str:
+def _normalize_text(text: str) -> str:
+    """Supprime les accents/diacritiques et normalise la casse et les espaces."""
+    decomposed = unicodedata.normalize("NFKD", text or "")
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", stripped).strip().lower()
+
+
+def _extract_surname_and_initial(full_name: str) -> Tuple[str, str]:
+    norm = _normalize_text(full_name).replace("-", " ")
+    parts = norm.split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[-1], parts[0][0]
+
+
+def _side_matches_player(side_text: str, full_name: str) -> bool:
+    """Vérifie qu'un côté ('Home' ou 'Away') correspond au joueur par frontières de mots."""
+    surname, first_init = _extract_surname_and_initial(full_name)
+    if not surname:
+        return False
+    norm_side = _normalize_text(side_text).replace("-", " ")
+    if not re.search(rf"\b{re.escape(surname)}\b", norm_side):
+        return False
+    # Si les deux noms de famille peuvent prêter à confusion, l'initiale aide à départager
+    full_norm = _normalize_text(full_name).replace("-", " ")
+    if full_norm in norm_side:
+        return True
+    if first_init:
+        side_tokens = [tok.rstrip(".") for tok in norm_side.split() if tok.rstrip(".") != surname]
+        if side_tokens and not any(tok.startswith(first_init) for tok in side_tokens):
+            return False
+    return True
+
+
+def _resolve_match_order(
+    match_title: str, player_a_name: str, player_b_name: str
+) -> Optional[bool]:
+    """Retourne True si player_a est Home (gauche), False si player_a est Away, None sinon."""
+    if not match_title or "/" in match_title:
+        return None
+
+    if " - " in match_title:
+        left, right = match_title.split(" - ", 1)
+        a_left = _side_matches_player(left, player_a_name)
+        b_right = _side_matches_player(right, player_b_name)
+        if a_left and b_right:
+            return True
+        a_right = _side_matches_player(right, player_a_name)
+        b_left = _side_matches_player(left, player_b_name)
+        if a_right and b_left:
+            return False
+        return None
+
+    norm_title = _normalize_text(match_title).replace("-", " ")
+    sur_a, _ = _extract_surname_and_initial(player_a_name)
+    sur_b, _ = _extract_surname_and_initial(player_b_name)
+    if not sur_a or not sur_b or sur_a == sur_b:
+        return None
+
+    m_a = re.search(rf"\b{re.escape(sur_a)}\b", norm_title)
+    m_b = re.search(rf"\b{re.escape(sur_b)}\b", norm_title)
+    if not (m_a and m_b):
+        return None
+    return m_a.start() < m_b.start()
+
+
+async def fetch_odds(
+    session: aiohttp.ClientSession,
+    player: str,
+    timeout_seconds: float = ODDS_TIMEOUT_SECONDS,
+) -> str:
     """Télécharge la page de recherche OddsPortal pour un joueur."""
-    if not player:
+    clean_query = _normalize_text(player)
+    if not clean_query:
         return ""
-    url = f"https://www.oddsportal.com/search/{player}/tennis/"
+    encoded = quote(clean_query, safe="")
+    url = f"https://www.oddsportal.com/search/{encoded}/tennis/"
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+        async with session.get(
+            url, timeout=aiohttp.ClientTimeout(total=timeout_seconds)
+        ) as resp:
             if resp.status == 200:
                 return await resp.text()
     except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
@@ -97,22 +176,30 @@ def extract_data(text: str) -> Tuple[Optional[str], Optional[str], Optional[str]
     return name, odds1, odds2
 
 
+def _html_contains_pair(html: str, player1_name: str, player2_name: str) -> bool:
+    """Vérifie qu'un HTML OddsPortal contient bien le match exact entre les deux joueurs."""
+    if not html:
+        return False
+    for title, odds1, odds2 in _extract_json_events(html):
+        if odds1 and odds2 and _resolve_match_order(title, player1_name, player2_name) is not None:
+            return True
+    name, odds1, odds2 = extract_data(html)
+    if name and odds1 and odds2:
+        return _resolve_match_order(name, player1_name, player2_name) is not None
+    return False
+
+
 def _assign_player_odds(
     match_title: str, odds: Tuple[float, float], match: MatchAnalysisData
 ) -> bool:
     """Vérifie que c'est un simple (pas de '/') et que les DEUX joueurs correspondent."""
-    if not match_title or "/" in match_title:
-        return False
-    title_low = match_title.lower()
-    p1_last = match.player_a.name.split()[-1].lower()
-    p2_last = match.player_b.name.split()[-1].lower()
-
-    p1_pos = title_low.find(p1_last)
-    p2_pos = title_low.find(p2_last)
-    if p1_pos == -1 or p2_pos == -1:
+    a_is_first = _resolve_match_order(
+        match_title, match.player_a.name, match.player_b.name
+    )
+    if a_is_first is None:
         return False
 
-    if p1_pos < p2_pos:
+    if a_is_first:
         match.player_a.book_odds, match.player_b.book_odds = odds[0], odds[1]
     else:
         match.player_a.book_odds, match.player_b.book_odds = odds[1], odds[0]
@@ -151,12 +238,13 @@ def process_odds(html: str, match: MatchAnalysisData) -> bool:
 async def fetch_both_odds(
     session: aiohttp.ClientSession, player1_name: str, player2_name: str
 ) -> Tuple[str, str]:
-    """Tente le joueur 1 en priorité et court-circuite la 2e requête si trouvé."""
+    """Tente le joueur 1 en priorité et court-circuite uniquement si la paire exacte est trouvée."""
     surname_1 = player1_name.split()[-1] if player1_name else ""
     surname_2 = player2_name.split()[-1] if player2_name else ""
     html1 = await fetch_odds(session, surname_1)
-    name, odds1, odds2 = extract_data(html1)
-    if name and odds1 and odds2:
+    if _html_contains_pair(html1, player1_name, player2_name):
+        return html1, ""
+    if _normalize_text(surname_2) == _normalize_text(surname_1):
         return html1, ""
     html2 = await fetch_odds(session, surname_2)
     return html1, html2

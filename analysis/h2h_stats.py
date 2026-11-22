@@ -3,7 +3,27 @@
 from datetime import datetime
 import re
 from typing import Tuple
+import unicodedata
 from core.models import H2HMetrics
+from utils.helpers import parse_english_date
+
+
+def _norm(name: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", name or "")
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", stripped).strip().lower()
+
+
+def _matches_player(winner: str, player_name: str) -> bool:
+    w_norm = _norm(winner)
+    p_norm = _norm(player_name)
+    if not w_norm or not p_norm:
+        return False
+    if w_norm in p_norm or p_norm in w_norm:
+        return True
+    w_parts = w_norm.split()
+    p_parts = p_norm.split()
+    return bool(w_parts and p_parts and w_parts[-1] == p_parts[-1])
 
 
 class DateUtils:
@@ -11,10 +31,10 @@ class DateUtils:
 
     @staticmethod
     def parse_date(date_str: str) -> float:
-        """Convertit une date texte en timestamp."""
+        """Convertit une date texte anglaise en timestamp (indépendant de la locale OS)."""
         try:
-            return datetime.strptime(date_str.strip(), "%b %d %Y").timestamp()
-        except (ValueError, AttributeError):
+            return parse_english_date(date_str).timestamp()
+        except (ValueError, AttributeError, TypeError):
             return 0.0
 
     @staticmethod
@@ -58,9 +78,11 @@ class H2HStats:
         self, winner: str, date_ms: float, surface: str, score: str, current_surface: str
     ) -> None:
         """Met à jour les compteurs suite à une rencontre historique."""
-        if winner and winner in self.player_a:
+        if not winner or not winner.strip():
+            return
+        if _matches_player(winner, self.player_a):
             self._record_win(self.p_a, date_ms, surface, score, current_surface, loser_idx=0)
-        else:
+        elif _matches_player(winner, self.player_b):
             self._record_win(self.p_b, date_ms, surface, score, current_surface, loser_idx=1)
 
     def _record_win(
@@ -76,7 +98,7 @@ class H2HStats:
         if DateUtils.is_within_last_year(date_ms):
             player_stats.wins_year += 1
             self.h2h_y += 1
-        if current_surface and current_surface in surface:
+        if current_surface and current_surface.lower() in (surface or "").lower():
             player_stats.wins_surface += 1
         self._update_game_stats(score, loser_idx)
 

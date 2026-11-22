@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from strategy.alpha_strategy import evaluate_alpha_strategy, format_alpha_summary
+from strategy.alpha_strategy import evaluate_alpha_strategy
 from backtest.strategy_evaluator import StrategyEvaluator
 
 class TestAlphaStrategy(unittest.TestCase):

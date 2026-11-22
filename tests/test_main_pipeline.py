@@ -1,9 +1,8 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
-import aiohttp
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from main import determine_elo_data, _get_credential, MatchProcessor

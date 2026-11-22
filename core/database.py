@@ -3,12 +3,15 @@
 from contextlib import contextmanager
 from datetime import datetime
 import os
+import re
 import sqlite3
 from typing import Any, Dict, Iterator, List, Set
+import unicodedata
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from core.models import MatchAnalysisData
+from core.player_extractor import PlayerExtractor
 
 DB_FILE = "tennis_ai.db"
 SQL_DUMP_FILE = "tennis_ai_dump.sql"
@@ -47,6 +50,28 @@ def _to_float(val: str) -> float:
         return 0.0
 
 
+def _normalize_player_name(name: str) -> str:
+    alias = PlayerExtractor.PLAYER_ALIASES.get((name or "").strip(), (name or "").strip())
+    decomposed = unicodedata.normalize("NFKD", alias)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", stripped).strip().lower()
+
+
+def _winner_matches(selected_player: str, winner_name: str) -> bool:
+    """Compare selected_player et winner_name en tolérant accents, alias et initiales."""
+    sel_norm = _normalize_player_name(selected_player)
+    win_norm = _normalize_player_name(winner_name)
+    if not sel_norm or not win_norm:
+        return False
+    if sel_norm in win_norm or win_norm in sel_norm:
+        return True
+    sel_parts = sel_norm.split()
+    win_parts = win_norm.split()
+    if sel_parts and win_parts and sel_parts[-1] == win_parts[-1]:
+        return sel_parts[0][0] == win_parts[0][0]
+    return False
+
+
 class TennisDatabase:
     """Gère le stockage SQLite (mode WAL), le dump SQL Git, la CLV et l'export Excel."""
 
@@ -57,7 +82,7 @@ class TennisDatabase:
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
@@ -84,7 +109,7 @@ class TennisDatabase:
             sql_script = f_dump.read()
         if not sql_script.strip():
             return
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         try:
             conn.executescript(sql_script)
             conn.commit()
@@ -333,10 +358,12 @@ class TennisDatabase:
                 status = "Remboursé"
                 profit = 0.0
             else:
-                won = row["selected_player"].lower() in winner_name.lower()
+                won = _winner_matches(row["selected_player"], winner_name)
                 stake = row["kelly_stake_pct"] or 1.0
                 status = "Gagné" if won else "Perdu"
-                profit = round(stake * (row["book_odds"] - 1.0), 2) if won else round(-stake, 2)
+                profit = (
+                    round(stake * (row["book_odds"] - 1.0), 2) if won else round(-stake, 2)
+                )
 
             conn.execute(
                 "UPDATE bets SET status = ?, winner = ?, profit_units = ? WHERE match_url = ?",
@@ -359,7 +386,14 @@ class TennisDatabase:
 
         settled = int(row["settled"])
         if settled == 0:
-            return {"settled": 0, "won": 0, "winrate": 0.0, "profit": 0.0, "roi": 0.0, "avg_clv": 0.0}
+            return {
+                "settled": 0,
+                "won": 0,
+                "winrate": 0.0,
+                "profit": 0.0,
+                "roi": 0.0,
+                "avg_clv": 0.0,
+            }
 
         won = int(row["won"])
         staked = float(row["staked"])

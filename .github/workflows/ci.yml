@@ -1,0 +1,33 @@
+name: CI Quality & Tests
+
+on:
+  push:
+    branches: ["main", "test_neon_4_high"]
+  pull_request:
+    branches: ["main", "test_neon_4_high"]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configuration de Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Installation des dépendances dev
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Analyse statique (Ruff)
+        run: ruff check .
+
+      - name: Suite de tests unitaires (Pytest)
+        run: pytest -v

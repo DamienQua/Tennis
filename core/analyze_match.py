@@ -24,6 +24,7 @@ from data_providers.elo_matcher import EloMatcher
 from data_providers.odds_match import odds_match, fetch_both_odds
 from strategy.alpha_strategy import evaluate_alpha_strategy
 from strategy.generate_match_xlsx import generate_match_xlsx
+from utils.helpers import fetch_with_retry
 
 logger = logging.getLogger(__name__)
 ADMIN_URL = "https://tennisinsight.com/wp-admin/admin-ajax.php"
@@ -41,31 +42,13 @@ def clear_session_bets() -> None:
     SESSION_BETS.clear()
 
 
-async def _attempt_fetch(
-    session: aiohttp.ClientSession, url: str, method: str, data: Any
-) -> Optional[str]:
-    req = session.post(url, data=data) if method == "post" else session.get(url)
-    async with req as response:
-        if response.status == 200:
-            text = await response.text()
-            return text if text and text.strip() else None
-        return None
-
-
 async def fetch_data(
     session: aiohttp.ClientSession, url: str, method: str = "get", data: Any = None
 ) -> str:
     """Exécute une requête HTTP avec tentatives de reprise."""
-    for attempt in range(3):
-        try:
-            result = await _attempt_fetch(session, url, method, data)
-            if result is not None:
-                return result
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
-            pass
-        if attempt < 2:
-            await asyncio.sleep(1.0 * (attempt + 1))
-    return ""
+    return await fetch_with_retry(
+        session, url, method=method, data=data, attempts=3, backoff_step=1.0
+    )
 
 
 async def _fetch_match_soups(
@@ -132,6 +115,25 @@ def _populate_metadata(
     match.player_a.ranking, match.player_b.ranking = rankings[0], rankings[1]
 
 
+def _populate_elo_ratings(elo_data: str, match: MatchAnalysisData) -> None:
+    """Associe les classements ELO par surface avant le calcul des cotes modèle."""
+    if not elo_data:
+        return
+    elo_a, elo_b = EloMatcher.find_elo_ratings(
+        elo_data, match.player_a.name, match.player_b.name, match.surface
+    )
+    try:
+        if elo_a:
+            match.player_a.elo = float(elo_a)
+    except ValueError:
+        pass
+    try:
+        if elo_b:
+            match.player_b.elo = float(elo_b)
+    except ValueError:
+        pass
+
+
 async def _run_analysis_phases(
     session: aiohttp.ClientSession,
     header: dict,
@@ -173,19 +175,11 @@ async def _run_analysis_phases(
 
 
 def _evaluate_and_record_strategy(
-    elo_data: str, match: MatchAnalysisData, db: Optional[TennisDatabase]
+    match: MatchAnalysisData, db: Optional[TennisDatabase]
 ) -> None:
-    """Associe les cotes ELO, évalue Alpha 5+ et enregistre le pari dans SQLite."""
-    elo_a, elo_b = EloMatcher.find_elo_ratings(
-        elo_data, match.player_a.name, match.player_b.name, match.surface
-    )
-    if elo_a:
-        match.player_a.elo = float(elo_a)
-    if elo_b:
-        match.player_b.elo = float(elo_b)
-
+    """Évalue la stratégie Alpha 5+ et enregistre le pari dans SQLite."""
     alpha_res = evaluate_alpha_strategy(match)
-    print(f"  {alpha_res['summary']}")
+    logger.info("  %s", alpha_res["summary"])
 
     if alpha_res.get("bet_recommended"):
         inserted = db.save_bet(match, alpha_res) if db else True
@@ -221,6 +215,7 @@ async def analyze_match(
 
     match = MatchAnalysisData(match_url=match_url)
     _populate_metadata(match, tournaments, parsed["soup_main"], parsed["soup_overview"])
+    _populate_elo_ratings(elo_data, match)
 
     odds_future = asyncio.create_task(
         fetch_both_odds(session, match.player_a.name, match.player_b.name)
@@ -229,6 +224,6 @@ async def analyze_match(
     compare_players(match)
     await odds_match(match, session=session, odds_future=odds_future)
     compare_indice(match)
-    _evaluate_and_record_strategy(elo_data, match, db)
+    _evaluate_and_record_strategy(match, db)
     await asyncio.to_thread(generate_match_xlsx, match)
     return match

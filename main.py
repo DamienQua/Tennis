@@ -128,8 +128,7 @@ class MatchProcessor:
     def finalize_result(self, match_info: str, match_url: str, start: float) -> str:
         result = self.format_result(match_info, match_url)
         raw_elapsed = round(time.perf_counter() - start, 2)
-        print(f"Match : {result}")
-        print(f"Time elapsed : {raw_elapsed} sec\n")
+        logger.info("Match : %s (%.2fs)", result, raw_elapsed)
         return result
 
 
@@ -178,8 +177,24 @@ def _get_credential(config: dict, key: str) -> str:
     return _clean_val(val, key)
 
 
+def _has_wordpress_auth_cookie(
+    session: aiohttp.ClientSession, response: aiohttp.ClientResponse
+) -> bool:
+    """Vérifie la présence d'un cookie de session WordPress authentifiée."""
+    resp_cookies = getattr(response, "cookies", None) or {}
+    if any(str(name).startswith("wordpress_logged_in_") for name in resp_cookies):
+        return True
+
+    jar = getattr(session, "cookie_jar", None)
+    if jar is not None:
+        for cookie in jar:
+            if getattr(cookie, "key", "").startswith("wordpress_logged_in_"):
+                return True
+    return False
+
+
 async def login(session: aiohttp.ClientSession) -> None:
-    """Authentifie la session HTTP sur TennisInsight."""
+    """Authentifie la session HTTP sur TennisInsight et vérifie le cookie WordPress."""
     config = dotenv_values(".env") if os.path.exists(".env") else {}
     username = _get_credential(config, "TENNISINSIGHT_LOGIN")
     password = _get_credential(config, "TENNISINSIGHT_PASSWORD")
@@ -193,11 +208,19 @@ async def login(session: aiohttp.ClientSession) -> None:
         data={"log": username, "pwd": password},
     ) as resp:
         resp.raise_for_status()
+        if not _has_wordpress_auth_cookie(session, resp):
+            body_preview = (await resp.text())[:500].lower()
+            hint = " (erreur login WordPress détectée)" if "login_error" in body_preview else ""
+            raise RuntimeError(
+                f"Échec d'authentification TennisInsight : cookie wordpress_logged_in_* absent{hint}."
+            )
+    logger.info("Authentification TennisInsight vérifiée avec succès.")
 
 
 async def fetch_match_previews(session: aiohttp.ClientSession) -> Tuple[np.ndarray, List[str]]:
     """Récupère les tournois actifs et les liens des matchs du jour."""
     async with session.get("https://tennisinsight.com/match-previews/") as resp:
+        resp.raise_for_status()
         html = await resp.text()
     soup = BeautifulSoup(html, "lxml")
     tournaments = np.array([
@@ -275,10 +298,12 @@ async def process_matches(
     total_elapsed = round(time.perf_counter() - batch_start, 2)
     count = len(ctx.results)
     avg_per_match = round(total_elapsed / count, 2) if count > 0 else 0.0
-    print(f"\n{'=' * 55}")
-    print(f"Total processing time : {total_elapsed} sec ({count} match(s) processed)")
-    print(f"Average time per match: {avg_per_match} sec/match")
-    print(f"{'=' * 55}\n")
+    logger.info(
+        "Batch terminé : %d match(s) en %.2fs (moyenne %.2fs/match)",
+        count,
+        total_elapsed,
+        avg_per_match,
+    )
 
     return ("\n".join(ctx.results) + "\n") if ctx.results else ""
 
@@ -333,7 +358,8 @@ async def main() -> None:
         )
 
     excel_path = db.export_bets_to_excel()
-    print(matchs)
+    if matchs:
+        print(matchs)
     _notify_daily_results(matchs, excel_path=excel_path)
 
 

@@ -1,53 +1,57 @@
-import unittest
-import numpy as np
-import asyncio
-import sys
-import os
+"""Tests unitaires pour la génération de fiches Excel par match."""
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from strategy.generate_match_xlsx import generate_match_xlsx, _prepare_match_data
+import unittest
+from core.models import MatchAnalysisData, PlayerStats
+from strategy.generate_match_xlsx import _prepare_match_data
+
 
 class TestGenerateXlsx(unittest.TestCase):
     """Unit tests for Excel match preview workbook generation."""
-    def test_prepare_match_data_contains_alpha(self):
-        match_vec = np.full(44, '', dtype='<U100')
-        match_vec[0] = 'Roland Garros 2026'
-        match_vec[1] = 'Clay'
-        match_vec[2] = 'Carlos Alcaraz'
-        match_vec[3] = 'Fabio Fognini'
-        match_vec[4] = '2'
-        match_vec[5] = '95'
-        match_vec[36] = '1.25'
-        match_vec[37] = '4.50'
-        match_vec[38] = '1.50'
-        match_vec[39] = '2.80'
-        match_vec[40] = '2150'
-        match_vec[41] = '1900'
 
-        rows = _prepare_match_data(match_vec, match_vec[2], match_vec[3])
-        # Find row with STRATÉGIE ALPHA 5+
-        strategy_rows = [row for row in rows if 'STRATÉGIE ALPHA 5+' in row[0]]
+    def test_prepare_match_data_contains_alpha(self):
+        match = MatchAnalysisData(
+            match_url="https://tennisinsight.com/match/1/2026-rg/qf/alcaraz-vs-fognini",
+            tournament="Roland Garros 2026",
+            surface="Clay",
+            player_a=PlayerStats(
+                name="Carlos Alcaraz",
+                ranking=2,
+                model_odds=1.25,
+                book_odds=1.50,
+                elo=2150.0,
+            ),
+            player_b=PlayerStats(
+                name="Fabio Fognini",
+                ranking=95,
+                model_odds=4.50,
+                book_odds=2.80,
+                elo=1900.0,
+            ),
+        )
+        rows = _prepare_match_data(match)
+        strategy_rows = [row for row in rows if "STRATÉGIE ALPHA 5+" in row[0]]
         self.assertEqual(len(strategy_rows), 1)
-        self.assertEqual(strategy_rows[0][1], 'PARI CONSEILLÉ')
-        self.assertEqual(strategy_rows[0][2], '-')
+        self.assertEqual(strategy_rows[0][1], "PARI CONSEILLÉ")
+        self.assertEqual(strategy_rows[0][2], "-")
 
     def test_prepare_match_data_no_bet(self):
-        match_vec = np.full(44, '', dtype='<U100')
-        match_vec[0] = 'Roland Garros 2026'
-        match_vec[2] = 'Player 1'
-        match_vec[3] = 'Player 2'
-        match_vec[36] = '1.80'
-        match_vec[37] = '1.90'
-        match_vec[38] = '1.75'
-        match_vec[39] = '1.95'
-        match_vec[40] = '1900'
-        match_vec[41] = '1880'
-
-        rows = _prepare_match_data(match_vec, match_vec[2], match_vec[3])
-        strategy_rows = [row for row in rows if 'STRATÉGIE ALPHA 5+' in row[0]]
+        match = MatchAnalysisData(
+            match_url="https://tennisinsight.com/match/2/2026-rg/r32/p1-vs-p2",
+            tournament="Roland Garros 2026",
+            surface="Clay",
+            player_a=PlayerStats(
+                name="Player 1", model_odds=1.80, book_odds=1.75, elo=1900.0
+            ),
+            player_b=PlayerStats(
+                name="Player 2", model_odds=1.90, book_odds=1.95, elo=1880.0
+            ),
+        )
+        rows = _prepare_match_data(match)
+        strategy_rows = [row for row in rows if "STRATÉGIE ALPHA 5+" in row[0]]
         self.assertEqual(len(strategy_rows), 1)
-        self.assertEqual(strategy_rows[0][1], '-')
-        self.assertEqual(strategy_rows[0][2], '-')
+        self.assertEqual(strategy_rows[0][1], "-")
+        self.assertEqual(strategy_rows[0][2], "-")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

@@ -1,10 +1,12 @@
-"""Client asynchrone TennisInsight avec cache LRU et retries."""
+"""Client asynchrone TennisInsight avec cache LRU, déduplication in-flight et retries."""
 
 import asyncio
 from collections import OrderedDict
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+import weakref
 import aiohttp
 from bs4 import BeautifulSoup
+from utils.helpers import fetch_with_retry
 
 
 class TennisDataFetcher:
@@ -12,30 +14,36 @@ class TennisDataFetcher:
 
     _activity_pane_cache: OrderedDict[str, str] = OrderedDict()
     _MAX_CACHE_SIZE = 256
+    _locks_by_loop: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Dict[str, asyncio.Lock]]" = (
+        weakref.WeakKeyDictionary()
+    )
 
     def __init__(self, session: aiohttp.ClientSession, admin_url: Optional[str] = None) -> None:
         self.session = session
         self.admin_url = admin_url
 
+    @classmethod
+    def _get_inflight_lock(cls, key: str) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        loop_locks = cls._locks_by_loop.setdefault(loop, {})
+        if len(loop_locks) > cls._MAX_CACHE_SIZE * 2:
+            idle_keys = [
+                k for k, lk in loop_locks.items()
+                if not lk.locked() and not getattr(lk, "_waiters", None)
+            ]
+            for k in idle_keys[:cls._MAX_CACHE_SIZE]:
+                loop_locks.pop(k, None)
+        lock = loop_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            loop_locks[key] = lock
+        return lock
+
     async def fetch_data(self, url: str, data: Any = None, method: str = "POST") -> str:
         """Exécute une requête HTTP avec backoff linéaire sur 3 tentatives."""
-        for attempt in range(3):
-            try:
-                req = (
-                    self.session.get(url)
-                    if method.upper() == "GET"
-                    else self.session.post(url, data=data)
-                )
-                async with req as response:
-                    if response.status == 200:
-                        text = await response.text()
-                        if text:
-                            return text
-            except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError):
-                pass
-            if attempt < 2:
-                await asyncio.sleep(1.5 * (attempt + 1))
-        return ""
+        return await fetch_with_retry(
+            self.session, url, method=method, data=data, attempts=3, backoff_step=1.5
+        )
 
     @staticmethod
     def _extract_tournament_name(soup: BeautifulSoup) -> str:
@@ -48,20 +56,29 @@ class TennisDataFetcher:
                     return parts[1].strip()
         return ""
 
-    async def fetch_tournament_data(self, match_id: str, default_tour: str = "") -> str:
-        """Récupère le nom officiel du tournoi depuis le panneau activity."""
-        try:
-            if match_id not in self._activity_pane_cache:
-                pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
-                html = await self.fetch_data(self.admin_url, pane_req)
-                if html:
-                    self._activity_pane_cache[match_id] = html
-                    if len(self._activity_pane_cache) > self._MAX_CACHE_SIZE:
-                        self._activity_pane_cache.popitem(last=False)
-            else:
-                self._activity_pane_cache.move_to_end(match_id)
+    async def _fetch_activity_pane_html(self, match_id: str) -> str:
+        if match_id in self._activity_pane_cache:
+            self._activity_pane_cache.move_to_end(match_id)
+            return self._activity_pane_cache[match_id]
 
-            soup = BeautifulSoup(self._activity_pane_cache.get(match_id, ""), "lxml")
+        async with self._get_inflight_lock(match_id):
+            if match_id in self._activity_pane_cache:
+                self._activity_pane_cache.move_to_end(match_id)
+                return self._activity_pane_cache[match_id]
+
+            pane_req = {"action": "lazyLoadPanes", "pane": "activity", "matchID": match_id}
+            html = await self.fetch_data(self.admin_url, pane_req)
+            if html:
+                self._activity_pane_cache[match_id] = html
+                if len(self._activity_pane_cache) > self._MAX_CACHE_SIZE:
+                    self._activity_pane_cache.popitem(last=False)
+            return html
+
+    async def fetch_tournament_data(self, match_id: str, default_tour: str = "") -> str:
+        """Récupère le nom officiel du tournoi depuis le panneau activity (dédupliqué)."""
+        try:
+            html = await self._fetch_activity_pane_html(match_id)
+            soup = BeautifulSoup(html, "lxml")
             tour_name = self._extract_tournament_name(soup)
             if tour_name:
                 return tour_name

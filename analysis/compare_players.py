@@ -1,40 +1,60 @@
 """Comparaison des attributs joueurs et calcul des cotes du modèle (calibrable par surface)."""
 
 import json
+import logging
 from math import ceil, floor
 import os
 from typing import Any, Dict, Tuple
 from core.models import MatchAnalysisData
+from utils.helpers import normalize_surface
 
+logger = logging.getLogger(__name__)
 CALIBRATED_WEIGHTS_PATH = "config/calibrated_weights.json"
 
 _DEFAULT_WEIGHTS: Dict[str, Dict[str, float]] = {
-    "hard": {"rank": 5.0, "form": 20.0, "surface": 30.0, "elo": 0.0, "trj": 0.90},
-    "clay": {"rank": 5.0, "form": 20.0, "surface": 30.0, "elo": 0.0, "trj": 0.90},
-    "grass": {"rank": 5.0, "form": 20.0, "surface": 30.0, "elo": 0.0, "trj": 0.90},
+    "hard": {"rank": 5.0, "form": 20.0, "surface": 30.0, "elo": 0.15, "trj": 0.90},
+    "clay": {"rank": 5.0, "form": 20.0, "surface": 35.0, "elo": 0.15, "trj": 0.90},
+    "grass": {"rank": 5.0, "form": 18.0, "surface": 32.0, "elo": 0.18, "trj": 0.90},
 }
+
+_MIN_PROB = 0.02
+_MAX_PROB = 0.98
+
+
+def _is_calibration_healthy(entry: Dict[str, Any]) -> bool:
+    """Vérifie qu'une calibration enregistrée n'a pas dégradé le Brier Score."""
+    if entry.get("accepted") is False:
+        return False
+    b_before = entry.get("brier_before")
+    b_after = entry.get("brier_after")
+    if b_before is not None and b_after is not None:
+        try:
+            if float(b_after) > float(b_before):
+                return False
+        except (ValueError, TypeError):
+            return False
+    return True
 
 
 def _load_surface_weights(surface: str) -> Dict[str, float]:
-    s_low = surface.strip().lower()
-    bucket = "clay" if "clay" in s_low else ("grass" if "grass" in s_low else "hard")
+    bucket = normalize_surface(surface)
     if os.path.exists(CALIBRATED_WEIGHTS_PATH):
         try:
             with open(CALIBRATED_WEIGHTS_PATH, "r", encoding="utf-8") as f_in:
                 data = json.load(f_in)
-            if bucket in data:
-                return {**_DEFAULT_WEIGHTS[bucket], **data[bucket]}
+            entry = data.get(bucket)
+            if isinstance(entry, dict):
+                if _is_calibration_healthy(entry):
+                    return {**_DEFAULT_WEIGHTS[bucket], **entry}
+                logger.warning(
+                    "Calibration '%s' ignorée (Brier dégradé : %s -> %s), repli sur défauts.",
+                    bucket,
+                    entry.get("brier_before"),
+                    entry.get("brier_after"),
+                )
         except (OSError, ValueError, TypeError):
             pass
     return _DEFAULT_WEIGHTS[bucket]
-
-
-def _safe_float(val: Any, default: float = 0.0) -> float:
-    try:
-        str_val = str(val).strip()
-        return float(str_val) if str_val else default
-    except (ValueError, TypeError):
-        return default
 
 
 def _score_diff(diff: float, step: float = 1.0, use_floor: bool = False) -> Tuple[float, float]:
@@ -62,17 +82,21 @@ def _score_binary(
 def _compute_odds_pair(
     score_a: float, score_b: float, trj: float = 0.90
 ) -> Tuple[float, float]:
-    total = score_a + score_b
-    if score_a <= score_b:
-        odds_a = round(trj * total / (score_a + 1e-3), 2)
-        odds_b = round(1 / (1 / trj - 1 / odds_a), 2)
-    else:
-        odds_b = round(trj * total / (score_b + 1e-3), 2)
-        odds_a = round(1 / (1 / trj - 1 / odds_b), 2)
-    return odds_a, odds_b
+    """Convertit deux scores en paire de cotes finies, positives et cohérentes avec le TRJ."""
+    safe_a = max(0.0, float(score_a))
+    safe_b = max(0.0, float(score_b))
+    total = safe_a + safe_b
+    if total <= 0.0:
+        balanced = round(2.0 * trj, 2)
+        return balanced, balanced
+
+    prob_a = min(max(safe_a / total, _MIN_PROB), _MAX_PROB)
+    prob_b = 1.0 - prob_a
+    return round(trj / prob_a, 2), round(trj / prob_b, 2)
 
 
-def _compare_typed_match(match: MatchAnalysisData) -> MatchAnalysisData:
+def compare_players(match: MatchAnalysisData) -> MatchAnalysisData:
+    """Calcule les cotes théoriques sur MatchAnalysisData."""
     pa, pb = match.player_a, match.player_b
     h2h = match.h2h
     weights = _load_surface_weights(match.surface)
@@ -98,43 +122,14 @@ def _compare_typed_match(match: MatchAnalysisData) -> MatchAnalysisData:
         _score_binary(pa.break_points_saved_pct, pb.break_points_saved_pct, 20.0),
     ]
 
-    elo_bonus_a = max(0.0, (pa.elo - pb.elo) * weights["elo"]) if (pa.elo > 0 and pb.elo > 0) else 0.0
-    elo_bonus_b = max(0.0, (pb.elo - pa.elo) * weights["elo"]) if (pa.elo > 0 and pb.elo > 0) else 0.0
+    elo_bonus_a = (
+        max(0.0, (pa.elo - pb.elo) * weights["elo"]) if (pa.elo > 0 and pb.elo > 0) else 0.0
+    )
+    elo_bonus_b = (
+        max(0.0, (pb.elo - pa.elo) * weights["elo"]) if (pa.elo > 0 and pb.elo > 0) else 0.0
+    )
 
     score_a = sum(c[0] for c in comparisons) + pa.odds_spread * 5.0 + elo_bonus_a
     score_b = sum(c[1] for c in comparisons) + pb.odds_spread * 5.0 + elo_bonus_b
     pa.model_odds, pb.model_odds = _compute_odds_pair(score_a, score_b, trj=weights["trj"])
     return match
-
-
-def _compare_legacy_array(data: Any) -> Any:
-    """Compatibilité ascendante pour les anciens vecteurs match_vs (44 éléments)."""
-    comparisons = [
-        _score_diff(_safe_float(data[5]) - _safe_float(data[4]), step=5.0, use_floor=True),
-        _score_diff(_safe_float(data[6]) - _safe_float(data[7]), step=1.0),
-        _score_diff(_safe_float(data[8]) - _safe_float(data[9]), step=3.0),
-        _score_diff(_safe_float(data[10]) - _safe_float(data[11]), step=5.0),
-        _score_diff(_safe_float(data[12]) - _safe_float(data[13]), step=5.0),
-        _score_binary(_safe_float(data[14]), _safe_float(data[25]), 10.0),
-        _score_binary(_safe_float(data[15]), _safe_float(data[26]), 20.0),
-        _score_binary(_safe_float(data[16]), _safe_float(data[27]), 20.0),
-        _score_binary(_safe_float(data[17]), _safe_float(data[28]), 20.0),
-        _score_binary(_safe_float(data[18]), _safe_float(data[29]), 20.0),
-        _score_binary(_safe_float(data[19]), _safe_float(data[30]), 30.0),
-        _score_binary(_safe_float(data[20]), _safe_float(data[31]), 10.0, invert=True),
-        _score_binary(_safe_float(data[21]), _safe_float(data[32]), 10.0, invert=True),
-        _score_binary(_safe_float(data[22]), _safe_float(data[33]), 20.0),
-        _score_binary(_safe_float(data[23]), _safe_float(data[34]), 20.0),
-        _score_binary(_safe_float(data[24]), _safe_float(data[35]), 20.0),
-    ]
-    score_a = sum(c[0] for c in comparisons) + _safe_float(data[42]) * 5.0
-    score_b = sum(c[1] for c in comparisons) + _safe_float(data[43]) * 5.0
-    data[36], data[37] = _compute_odds_pair(score_a, score_b)
-    return data
-
-
-def compare_players(match_data: Any) -> Any:
-    """Calcule les cotes théoriques sur MatchAnalysisData ou un vecteur match_vs."""
-    if isinstance(match_data, MatchAnalysisData):
-        return _compare_typed_match(match_data)
-    return _compare_legacy_array(match_data)

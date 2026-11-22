@@ -2,12 +2,13 @@
 
 from dataclasses import dataclass
 import re
-from typing import Any, Tuple
+from typing import Tuple
 import aiohttp
 from bs4 import BeautifulSoup
-from analysis.h2h_stats import H2HStats, DateUtils
+from analysis.h2h_stats import H2HStats, DateUtils, _matches_player
 from analysis.indice_confiance import indice_confiance
 from core.models import H2HMetrics, MatchAnalysisData
+from utils.helpers import normalize_surface
 
 
 @dataclass
@@ -20,18 +21,23 @@ class MatchContext:
     match_id: str
 
 
-class H2HDataProcessor:
-    """Parse les lignes HTML H2H (compatible MatchAnalysisData et vecteur match_vs)."""
+def _same_surface(target_surface: str, row_surface: str) -> bool:
+    if not (target_surface or "").strip() or not (row_surface or "").strip():
+        return False
+    if "carpet" in target_surface.lower() or "carpet" in row_surface.lower():
+        return "carpet" in target_surface.lower() and "carpet" in row_surface.lower()
+    return normalize_surface(target_surface) == normalize_surface(row_surface)
 
-    def __init__(self, data: BeautifulSoup, match: Any) -> None:
+
+class H2HDataProcessor:
+    """Parse les lignes HTML H2H sur MatchAnalysisData."""
+
+    def __init__(self, data: BeautifulSoup, match: MatchAnalysisData) -> None:
         self.data = data
         self.match = match
-        self._is_typed = isinstance(match, MatchAnalysisData)
-        name_a = match.player_a.name if self._is_typed else str(match[2])
-        name_b = match.player_b.name if self._is_typed else str(match[3])
-        self.surface = match.surface if self._is_typed else str(match[1])
-        self.player_a_name = name_a
-        self.stats = H2HStats(name_a, name_b)
+        self.surface = match.surface
+        self.player_a_name = match.player_a.name
+        self.stats = H2HStats(match.player_a.name, match.player_b.name)
         self.go_url = ""
         self.flag = 0
 
@@ -39,32 +45,15 @@ class H2HDataProcessor:
         """Exécute le comptage et le parsing des confrontations passées."""
         self._process_h2h_count()
         self._process_h2h_matches()
-        self._apply_metrics()
+        self.match.h2h = self.stats.to_metrics()
 
     def process_h2h_data(self) -> None:
         """Alias rétrocompatible de process()."""
         self.process()
 
-    def _reset_metrics(self) -> None:
-        if self._is_typed:
-            self.match.h2h = H2HMetrics()
-        else:
-            self.match[6:14] = [0] * 8
-
-    def _apply_metrics(self) -> None:
-        metrics = self.stats.to_metrics()
-        if self._is_typed:
-            self.match.h2h = metrics
-        elif self.stats.p_a.wins_all + self.stats.p_b.wins_all == 0:
-            self.match[6:14] = [0] * 8
-        else:
-            self.match[6:14] = (
-                metrics.all_time + metrics.last_year + metrics.surface + metrics.games
-            )
-
     def _process_h2h_count(self) -> None:
         if not self.data or not getattr(self.data, "text", None) or "series " not in self.data.text:
-            self._reset_metrics()
+            self.match.h2h = H2HMetrics()
             return
         ind = 1 if "tied" in self.data.text else 0
         for idx in range(2):
@@ -75,7 +64,7 @@ class H2HDataProcessor:
             except (IndexError, ValueError):
                 pass
         if self.stats.h2h_nb == 0:
-            self._reset_metrics()
+            self.match.h2h = H2HMetrics()
 
     @staticmethod
     def _parse_row_score(raw_score: str) -> str:
@@ -105,11 +94,11 @@ class H2HDataProcessor:
         return date_ms, surface_m, winner, cls._parse_row_score(raw_score)
 
     def _update_go_flag(self, row_elem, surface_m: str, winner: str) -> None:
-        if self.go_url == "" and surface_m and surface_m in row_elem.text:
+        if self.go_url == "" and _same_surface(self.surface, surface_m):
             links = row_elem.find_all("a")
             if links:
                 self.go_url = links[-1].get("href", "")
-                self.flag = 0 if winner == self.player_a_name else 1
+                self.flag = 0 if _matches_player(winner, self.player_a_name) else 1
 
     def _process_h2h_matches(self) -> None:
         h2h_elem = self.data.find(class_="h2h-matches") if self.data else None

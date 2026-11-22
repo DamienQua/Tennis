@@ -5,13 +5,14 @@ from typing import TYPE_CHECKING, Any, Dict, Tuple
 from utils.helpers import get_arg
 
 if TYPE_CHECKING:
-    from core.models import MatchAnalysisData
+    pass
 
 MIN_BOOK_ODDS = 1.40
 MAX_BOOK_ODDS = 2.50
 MIN_EV_THRESHOLD = 0.03
 MIN_ELO_GAP = 150.0
 MODEL_MARGIN = 0.90
+MIN_VALID_MODEL_ODDS = 0.85
 
 KELLY_FRACTION = 0.25
 MAX_STAKE_PCT = 3.0
@@ -25,7 +26,7 @@ def _safe_float(val: Any) -> float:
 
 
 def _calculate_probabilities(model_1: float, model_2: float) -> Tuple[float, float]:
-    if model_1 <= 1.01 or model_2 <= 1.01:
+    if model_1 < MIN_VALID_MODEL_ODDS or model_2 < MIN_VALID_MODEL_ODDS:
         return 0.0, 0.0
     p1_raw = MODEL_MARGIN / model_1
     p2_raw = MODEL_MARGIN / model_2
@@ -138,7 +139,8 @@ def evaluate_alpha_strategy(*args, **kwargs) -> Dict[str, Any]:
     """Évalue la stratégie Alpha 5+ sur MatchAnalysisData ou paramètres bruts."""
     pa, pb = _extract_players_adapter(args, kwargs)
     data_valid = (
-        min(pa.model_odds, pb.model_odds, pa.book_odds, pb.book_odds) > 1.01
+        min(pa.model_odds, pb.model_odds) >= MIN_VALID_MODEL_ODDS
+        and min(pa.book_odds, pb.book_odds) > 1.01
         and min(pa.elo, pb.elo) > 0
     )
     probs = _calculate_probabilities(pa.model_odds, pb.model_odds)
@@ -146,11 +148,11 @@ def evaluate_alpha_strategy(*args, **kwargs) -> Dict[str, Any]:
     cand_1 = _check_candidate(probs[0], pa.book_odds, diffs[0])
     cand_2 = _check_candidate(probs[1], pb.book_odds, diffs[1])
 
-    if cand_1[0]:
+    if data_valid and cand_1[0]:
         base = _build_bet_result(
             pa.name, 1, (pa.book_odds, pa.model_odds, probs[0]), (cand_1[1], diffs[0])
         )
-    elif cand_2[0]:
+    elif data_valid and cand_2[0]:
         base = _build_bet_result(
             pb.name, 2, (pb.book_odds, pb.model_odds, probs[1]), (cand_2[1], diffs[1])
         )

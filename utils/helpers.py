@@ -1,7 +1,118 @@
-"""Utilitaires de calcul et validation de dates pour le suivi des matchs."""
+"""Utilitaires partagés : parsing, normalisation texte/surface, dates et retries HTTP."""
 
+import asyncio
 from datetime import datetime
-from typing import Any, Sequence
+import re
+from typing import Any, Optional, Sequence
+import unicodedata
+import aiohttp
+
+_EN_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+_EN_DATE_RE = re.compile(r"^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$")
+_CHAR_TRANSLATION = str.maketrans({
+    "ł": "l",
+    "Ł": "l",
+    "đ": "d",
+    "Đ": "d",
+    "ø": "o",
+    "Ø": "o",
+    "ß": "ss",
+})
+
+
+def safe_float(val: Any, default: float = 0.0) -> float:
+    """Convertit une valeur quelconque en float sans lever d'exception."""
+    if val is None:
+        return default
+    try:
+        cleaned = str(val).replace(",", ".").strip()
+        return float(cleaned) if cleaned else default
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+
+def safe_int(val: Any, default: int = 0) -> int:
+    """Convertit une valeur quelconque en int sans lever d'exception."""
+    if val is None:
+        return default
+    try:
+        cleaned = str(val).replace(",", ".").strip()
+        return int(float(cleaned)) if cleaned else default
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+
+def normalize_surface(surface: str) -> str:
+    """Normalise une surface de tennis en bucket canonique ('hard', 'clay', 'grass')."""
+    s_low = (surface or "").strip().lower()
+    if "clay" in s_low:
+        return "clay"
+    if "grass" in s_low:
+        return "grass"
+    return "hard"
+
+
+def normalize_text(text: str) -> str:
+    """Supprime accents/diacritiques, normalise casse et espaces."""
+    translated = (text or "").translate(_CHAR_TRANSLATION)
+    decomposed = unicodedata.normalize("NFKD", translated)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", stripped).strip().lower()
+
+
+async def fetch_with_retry(
+    session: aiohttp.ClientSession,
+    url: str,
+    method: str = "GET",
+    data: Any = None,
+    attempts: int = 3,
+    backoff_step: float = 1.0,
+) -> str:
+    """Exécute une requête HTTP asynchrone avec backoff linéaire sur erreurs réseau."""
+    method_upper = method.upper()
+    for attempt in range(attempts):
+        try:
+            req = (
+                session.get(url)
+                if method_upper == "GET"
+                else session.post(url, data=data)
+            )
+            async with req as response:
+                if response.status == 200:
+                    text = await response.text()
+                    if text and text.strip():
+                        return text
+        except (aiohttp.ClientError, TimeoutError, asyncio.TimeoutError, OSError):
+            pass
+        if attempt < attempts - 1:
+            await asyncio.sleep(backoff_step * (attempt + 1))
+    return ""
+
+
+def parse_english_date(date_str: str) -> datetime:
+    """Parse une date anglaise ('May 01 2026') indépendamment de la locale système."""
+    cleaned = (date_str or "").strip()
+    match = _EN_DATE_RE.match(cleaned)
+    if not match:
+        raise ValueError(f"Format de date anglais invalide : {date_str!r}")
+    month_key = match.group(1)[:3].lower()
+    month = _EN_MONTHS.get(month_key)
+    if month is None:
+        raise ValueError(f"Mois anglais inconnu : {match.group(1)!r}")
+    return datetime(int(match.group(3)), month, int(match.group(2)))
 
 
 class DateHelper:
@@ -34,7 +145,7 @@ class DateHelper:
         """Vérifie si l'élément courant correspond à un match dans le dernier mois."""
         if show_class[idx].text == "Date":
             return False
-        parsed_ts = datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp()
+        parsed_ts = parse_english_date(show_class[date_i].text).timestamp()
         return (today - parsed_ts) <= one_month
 
     @staticmethod
@@ -42,7 +153,7 @@ class DateHelper:
         show_class: Sequence, date_i: int, today: float, one_month: int
     ) -> bool:
         """Vérifie si l'horodatage à date_i est dans la fenêtre d'un mois."""
-        parsed_ts = datetime.strptime(show_class[date_i].text, "%b %d %Y").timestamp()
+        parsed_ts = parse_english_date(show_class[date_i].text).timestamp()
         return (today - parsed_ts) <= one_month
 
     @staticmethod
@@ -69,13 +180,13 @@ class DateHelper:
         """Recherche en arrière un index de ligne contenant une date valide."""
         while date_i >= 0:
             try:
-                datetime.strptime(show_class[date_i].text, "%b %d %Y")
+                parse_english_date(show_class[date_i].text)
                 return date_i
             except (ValueError, IndexError):
                 date_i -= 1
         return 0
 
 
-def get_arg(args: Sequence[Any], index: int, fallback: Any = None) -> Any:
+def get_arg(args: Sequence[Any], index: int, fallback: Optional[Any] = None) -> Any:
     """Récupère un élément positionnel dans args si disponible, sinon fallback."""
     return args[index] if len(args) > index else fallback

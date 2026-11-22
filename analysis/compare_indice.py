@@ -1,7 +1,7 @@
-"""Calcul de l'indice de confiance final (compatible ConfidenceMetrics et indice_tab)."""
+"""Calcul de l'indice de confiance final sur MatchAnalysisData."""
 
 from math import ceil
-from typing import Any, List, Sequence
+from typing import List, Sequence, Tuple
 from core.models import ConfidenceMetrics, MatchAnalysisData
 
 
@@ -19,36 +19,15 @@ def _ratio_to_index(comp_value: float, comp_total: float) -> float:
 
 
 class IndiceComparator:
-    """Compare les indices de confiance entre deux joueurs."""
+    """Compare les métriques de confiance entre les deux joueurs."""
 
-    def __init__(self, source: Any) -> None:
-        self.source = source
+    def __init__(self, confidence: ConfidenceMetrics) -> None:
+        self.confidence = confidence
         self.comp: List[float] = [0.0, 0.0, 0.0]
 
     def compare_indices(self) -> List[float]:
-        """Exécute la comparaison sur ConfidenceMetrics ou un tableau indice_tab."""
-        if isinstance(self.source, ConfidenceMetrics):
-            self._compare_metrics(self.source)
-        else:
-            self._compare_legacy_array(self.source)
-        self.comp[2] = self.comp[0] + self.comp[1]
-        return self.comp
-
-    def _accumulate_fixed(self, pairs: Sequence[tuple]) -> None:
-        for val_a, val_b in pairs:
-            if val_a > val_b:
-                self.comp[0] += 20
-            elif val_a < val_b:
-                self.comp[1] += 20
-
-    def _accumulate_scaled(self, pairs: Sequence[tuple]) -> None:
-        for val_a, val_b in pairs:
-            if val_a > val_b:
-                self.comp[0] += 5 * ceil((val_a - val_b) / 10)
-            elif val_a < val_b:
-                self.comp[1] += 5 * ceil((val_b - val_a) / 10)
-
-    def _compare_metrics(self, conf: ConfidenceMetrics) -> None:
+        """Calcule les scores comparatifs [J1, J2, total] depuis ConfidenceMetrics."""
+        conf = self.confidence
         fixed_pairs = [
             (conf.motivation_a, conf.motivation_b),
             (conf.surface_rank_a, conf.surface_rank_b),
@@ -58,22 +37,28 @@ class IndiceComparator:
         ]
         self._accumulate_fixed(fixed_pairs)
         self._accumulate_scaled([*conf.tactical_pairs, conf.tiebreak_pair])
+        self.comp[2] = self.comp[0] + self.comp[1]
+        return self.comp
 
-    def _compare_legacy_array(self, tab: Sequence[float]) -> None:
-        fixed_pairs = [(tab[i], tab[i + 1]) for i in (0, 1, 4, 20, 22)]
-        scaled_pairs = [(tab[i], tab[i + 1]) for i in (6, 8, 10, 12, 14, 16, 18)]
-        self._accumulate_fixed(fixed_pairs)
-        self._accumulate_scaled(scaled_pairs)
+    def _accumulate_fixed(self, pairs: Sequence[Tuple[float, float]]) -> None:
+        for val_a, val_b in pairs:
+            if val_a > val_b:
+                self.comp[0] += 20.0
+            elif val_a < val_b:
+                self.comp[1] += 20.0
+
+    def _accumulate_scaled(self, pairs: Sequence[Tuple[float, float]]) -> None:
+        for val_a, val_b in pairs:
+            if val_a > val_b:
+                self.comp[0] += 5.0 * ceil((val_a - val_b) / 10.0)
+            elif val_a < val_b:
+                self.comp[1] += 5.0 * ceil((val_b - val_a) / 10.0)
 
 
-def calculate_indice_24(comp: Sequence[float], match_data: Any) -> float:
+def calculate_indice_24(comp: Sequence[float], match_data: MatchAnalysisData) -> float:
     """Calcule l'indice pondéré final à partir des scores comparatifs."""
-    if isinstance(match_data, MatchAnalysisData):
-        odds_a = match_data.player_a.model_odds
-        odds_b = match_data.player_b.model_odds
-    else:
-        odds_a = float(match_data[36])
-        odds_b = float(match_data[37])
+    odds_a = match_data.player_a.model_odds
+    odds_b = match_data.player_b.model_odds
 
     if odds_a < odds_b:
         return _ratio_to_index(comp[0], comp[2])
@@ -82,15 +67,9 @@ def calculate_indice_24(comp: Sequence[float], match_data: Any) -> float:
     return 1.0
 
 
-def compare_indice(target: Any, match_vs: Any = None) -> float:
-    """Point d'entrée compatible MatchAnalysisData et (indice_tab, match_vs)."""
-    if isinstance(target, MatchAnalysisData):
-        comparator = IndiceComparator(target.confidence)
-        comp = comparator.compare_indices()
-        target.confidence.final_index = calculate_indice_24(comp, target)
-        return target.confidence.final_index
-
-    comparator = IndiceComparator(target)
+def compare_indice(match: MatchAnalysisData) -> float:
+    """Calcule et enregistre confidence.final_index sur MatchAnalysisData."""
+    comparator = IndiceComparator(match.confidence)
     comp = comparator.compare_indices()
-    target[24] = calculate_indice_24(comp, match_vs)
-    return float(target[24])
+    match.confidence.final_index = calculate_indice_24(comp, match)
+    return match.confidence.final_index

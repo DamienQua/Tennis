@@ -90,23 +90,13 @@ class MotivationAnalyzer:
             return -1
 
     def calculate_motivation_index(self, cat: str, nb_matchs: int, flag: int) -> None:
-        thresholds = {
-            "250": (0, 2),
-            "500": (0, 2),
-            "1000": (0, float("inf")),
-            "Slam": (0, float("inf")),
-        }
+        cat_low = (cat or "").lower()
         score = 0.0
-        matched = False
-        for key, (low, high) in thresholds.items():
-            if key in cat:
-                if nb_matchs >= 0:
-                    score = 50.0 if low <= nb_matchs < high else 100.0
-                matched = True
-                break
-
-        if not matched and nb_matchs >= 0:
-            score = 50.0 if nb_matchs < 2 else 100.0
+        if nb_matchs >= 0:
+            if "1000" in cat_low or "slam" in cat_low or "masters" in cat_low:
+                score = 100.0
+            else:
+                score = 50.0 if nb_matchs < 2 else 100.0
 
         if flag == 0:
             self.confidence.motivation_a = score
