@@ -4,13 +4,14 @@ import asyncio
 import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+import aiohttp
 import pytest
 
 from analysis.h2h_stats import DateUtils
 from analysis.surface_performance_analyzer import SurfacePerformanceAnalyzer
 from analysis.tennis_data_fetcher import TennisDataFetcher
 from core.models import MatchAnalysisData, PlayerStats
-from main import login
+from main import TennisInsightOutageError, login, main
 from strategy.generate_match_xlsx import _sanitize_fs_name
 from utils.helpers import parse_english_date
 
@@ -18,9 +19,11 @@ odds_mod = importlib.import_module("data_providers.odds_match")
 
 
 class _FakePostContext:
-    def __init__(self, cookies=None, body=""):
+    def __init__(self, cookies=None, body="", status=200):
         self.cookies = cookies or {}
         self._body = body
+        self.status = status
+        self.history = ()
 
     def raise_for_status(self):
         return None
@@ -33,6 +36,131 @@ class _FakePostContext:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+@pytest.mark.asyncio
+async def test_wordpress_login_rejects_missing_auth_cookie_fast_on_credential_error(monkeypatch):
+    """Vérifie que login() échoue sans réessayer sur une vraie erreur d'identifiants (>500 chars)."""
+    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
+    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "wrong_pass")
+
+    long_head = "<html><head>" + ("x" * 1000) + "<title>Log In</title></head><body>"
+    err_body = (
+        f'{long_head}<div id="login_error">Error: The password you entered is incorrect.</div>'
+        "</body></html>"
+    )
+
+    session = MagicMock()
+    session.cookie_jar = []
+    session.get.return_value = _FakePostContext(
+        body='<form id="loginform"><input type="hidden" name="wp_nonce" value="tok123"/></form>'
+    )
+    session.post.return_value = _FakePostContext(cookies={}, body=err_body)
+
+    with pytest.raises(RuntimeError, match="incorrect") as exc_info:
+        await login(session, max_retries=4, base_delay=0.01)
+
+    assert not isinstance(exc_info.value, TennisInsightOutageError)
+    assert session.post.call_count == 1
+    sent_payload = session.post.call_args.kwargs["data"]
+    assert sent_payload["wp_nonce"] == "tok123"
+    assert sent_payload["testcookie"] == "1"
+    assert session.post.call_args.kwargs["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_wordpress_login_accepts_valid_cookie_on_302_without_redirect(monkeypatch):
+    """Vérifie que login() accepte un 302 authentifié sans suivre la redirection vers l'accueil."""
+    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
+    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
+
+    session = MagicMock()
+    session.cookie_jar = [SimpleNamespace(key="wordpress_logged_in_abc123")]
+    session.get.return_value = _FakePostContext(body="")
+    session.post.return_value = _FakePostContext(cookies={}, status=302)
+
+    await login(session, max_retries=2, base_delay=0.01)
+    assert session.post.call_args.kwargs["allow_redirects"] is False
+
+
+@pytest.mark.asyncio
+async def test_wordpress_login_retries_on_500_timeout_and_transient_no_cookie(monkeypatch):
+    """Vérifie le cache du pré-GET sur 500/Timeout et le rafraîchissement après un 200 sans cookie."""
+    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
+    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
+
+    class _Error500Context(_FakePostContext):
+        def raise_for_status(self):
+            raise aiohttp.ClientResponseError(
+                request_info=MagicMock(), history=(), status=500, message="Internal Server Error"
+            )
+
+    class _TimeoutContext:
+        async def __aenter__(self):
+            raise asyncio.TimeoutError()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    session = MagicMock()
+    session.cookie_jar = []
+    session.get.return_value = _FakePostContext(body="")
+    session.post.side_effect = [
+        _TimeoutContext(),
+        _Error500Context(),
+        _FakePostContext(cookies={}, body="<html><title>Temporary Cache</title></html>"),
+        _FakePostContext(cookies={"wordpress_logged_in_ok": "1"}, status=302),
+    ]
+
+    await login(session, max_retries=5, base_delay=0.01)
+    assert session.post.call_count == 4
+    assert session.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_soft_fail_on_outage_exits_cleanly_without_email(tmp_path):
+    """Vérifie que --soft-fail-on-outage quitte proprement (sans email) sur panne TennisInsight."""
+    fake_db = MagicMock()
+    fake_db.get_pending_bets.return_value = []
+
+    with (
+        patch("main.TennisDatabase", return_value=fake_db),
+        patch(
+            "main.login",
+            new=AsyncMock(side_effect=TennisInsightOutageError("MySQL 1040 Too many connections")),
+        ),
+        patch("main.send_daily_email") as mock_email,
+    ):
+        await main(["--with-update-results", "--soft-fail-on-outage"])
+        mock_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_soft_fail_on_outage_still_fails_on_credential_error():
+    """Vérifie qu'une vraie erreur d'identifiants fait toujours échouer le workflow."""
+    fake_db = MagicMock()
+    fake_db.get_pending_bets.return_value = []
+
+    with (
+        patch("main.TennisDatabase", return_value=fake_db),
+        patch("main.login", new=AsyncMock(side_effect=RuntimeError("password incorrect"))),
+    ):
+        with pytest.raises(RuntimeError, match="password incorrect"):
+            await main(["--with-update-results", "--soft-fail-on-outage"])
+
+
+@pytest.mark.asyncio
+async def test_without_soft_fail_flag_raises_on_outage():
+    """Vérifie que sans le flag, une panne TennisInsight lève bien TennisInsightOutageError."""
+    fake_db = MagicMock()
+    fake_db.get_pending_bets.return_value = []
+
+    with (
+        patch("main.TennisDatabase", return_value=fake_db),
+        patch("main.login", new=AsyncMock(side_effect=TennisInsightOutageError("500 outage"))),
+    ):
+        with pytest.raises(TennisInsightOutageError):
+            await main(["--with-update-results"])
 
 
 def test_odds_match_short_surname_no_false_positive_and_accents():
@@ -112,7 +240,7 @@ async def test_inflight_deduplication_prevents_duplicate_ajax_calls():
         surf_analyzer.fetch_statistics_html("match_42"),
     )
     assert s1 == s2
-    assert call_count == 2  # 1 pour activity + 1 pour statistics (et non 4)
+    assert call_count == 2
 
 
 def test_locale_independent_english_date_parsing():
@@ -128,75 +256,3 @@ def test_locale_independent_english_date_parsing():
 def test_windows_filename_sanitization():
     """Vérifie le nettoyage des caractères interdits Windows dans les chemins Excel."""
     assert _sanitize_fs_name('ATP 500: "Queen\'s" / London?*...') == "ATP_500_Queen's_London"
-
-@pytest.mark.asyncio
-async def test_wordpress_login_rejects_missing_auth_cookie_fast_on_credential_error(monkeypatch):
-    """Vérifie que login() échoue sans réessayer sur une vraie erreur d'identifiants (>500 chars)."""
-    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
-    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "wrong_pass")
-
-    long_head = "<html><head>" + ("x" * 1000) + "<title>Log In</title></head><body>"
-    err_body = f'{long_head}<div id="login_error">Error: The password you entered is incorrect.</div></body></html>'
-
-    session = MagicMock()
-    session.cookie_jar = []
-    session.get.return_value = _FakePostContext(
-        body='<form id="loginform"><input type="hidden" name="wp_nonce" value="tok123"/></form>'
-    )
-    session.post.return_value = _FakePostContext(cookies={}, body=err_body)
-
-    with pytest.raises(RuntimeError, match="incorrect"):
-        await login(session, max_retries=4, base_delay=0.01)
-    assert session.post.call_count == 1
-    sent_payload = session.post.call_args.kwargs["data"]
-    assert sent_payload["wp_nonce"] == "tok123"
-    assert sent_payload["testcookie"] == "1"
-
-
-@pytest.mark.asyncio
-async def test_wordpress_login_accepts_valid_cookie(monkeypatch):
-    """Vérifie que login() réussit quand wordpress_logged_in_* est dans la cookie_jar."""
-    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
-    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
-
-    session = MagicMock()
-    session.cookie_jar = [SimpleNamespace(key="wordpress_logged_in_abc123")]
-    session.get.return_value = _FakePostContext(body="")
-    session.post.return_value = _FakePostContext(cookies={})
-
-    await login(session, max_retries=2, base_delay=0.01)
-
-
-@pytest.mark.asyncio
-async def test_wordpress_login_retries_on_500_timeout_and_transient_no_cookie(monkeypatch):
-    """Vérifie que login() réessaie sur TimeoutError, HTTP 500 et 200 transitoire sans cookie."""
-    import aiohttp
-
-    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
-    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
-
-    class _Error500Context(_FakePostContext):
-        def raise_for_status(self):
-            raise aiohttp.ClientResponseError(
-                request_info=MagicMock(), history=(), status=500, message="Internal Server Error"
-            )
-
-    class _TimeoutContext:
-        async def __aenter__(self):
-            raise asyncio.TimeoutError()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    session = MagicMock()
-    session.cookie_jar = []
-    session.get.return_value = _FakePostContext(body="")
-    session.post.side_effect = [
-        _TimeoutContext(),
-        _Error500Context(),
-        _FakePostContext(cookies={}, body="<html><title>Temporary Cache</title></html>"),
-        _FakePostContext(cookies={"wordpress_logged_in_ok": "1"}),
-    ]
-
-    await login(session, max_retries=4, base_delay=0.01)
-    assert session.post.call_count == 4

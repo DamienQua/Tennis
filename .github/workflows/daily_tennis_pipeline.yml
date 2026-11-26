@@ -50,7 +50,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
-        run: python main.py --with-update-results
+        run: python main.py --with-update-results --soft-fail-on-outage
 
       - name: Export du dump SQL léger et sauvegarde sur test_neon_4_high
         if: always()

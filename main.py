@@ -50,6 +50,10 @@ _HARD_CREDENTIAL_MARKERS = (
 )
 
 
+class TennisInsightOutageError(RuntimeError):
+    """Indique une indisponibilité transitoire du serveur TennisInsight (5xx/timeout)."""
+
+
 class SessionConfig(NamedTuple):
     """Configuration de session HTTP, limiteur de débit et timeouts."""
 
@@ -164,16 +168,16 @@ class BatchContext:
 
 
 def create_session_config(
-    max_concurrent: int = 15, timeout_seconds: float = 30.0
+    max_concurrent: int = 6, timeout_seconds: float = 30.0
 ) -> SessionConfig:
-    """Initialise les paramètres de la session HTTP."""
+    """Initialise les paramètres de la session HTTP (ménage le serveur WordPress/MySQL)."""
     user_agent = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     )
     header = {"User-Agent": user_agent}
     conn = aiohttp.TCPConnector(limit=max_concurrent)
-    rate_limit = AsyncLimiter(10, 1)
+    rate_limit = AsyncLimiter(4, 1)
     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=10.0)
     return SessionConfig(header, conn, rate_limit, timeout)
 
@@ -259,10 +263,10 @@ async def _fetch_login_hidden_fields(
 
 async def login(
     session: aiohttp.ClientSession,
-    max_retries: int = 4,
-    base_delay: float = 3.0,
+    max_retries: int = 5,
+    base_delay: float = 5.0,
 ) -> None:
-    """Authentifie la session sur TennisInsight avec pré-GET WordPress et retries intelligents."""
+    """Authentifie la session sur TennisInsight sans suivre la redirection vers l'accueil."""
     config = dotenv_values(".env") if os.path.exists(".env") else {}
     username = _get_credential(config, "TENNISINSIGHT_LOGIN")
     password = _get_credential(config, "TENNISINSIGHT_PASSWORD")
@@ -277,10 +281,14 @@ async def login(
         "Referer": LOGIN_URL,
         "Origin": "https://tennisinsight.com",
     }
+    cached_hidden_fields: Optional[Dict[str, str]] = None
 
     for attempt in range(max_retries):
         try:
-            payload = await _fetch_login_hidden_fields(session, login_timeout)
+            if cached_hidden_fields is None:
+                cached_hidden_fields = await _fetch_login_hidden_fields(session, login_timeout)
+
+            payload = dict(cached_hidden_fields)
             payload.update({
                 "log": username,
                 "pwd": password,
@@ -294,6 +302,7 @@ async def login(
                 data=payload,
                 headers=post_headers,
                 timeout=login_timeout,
+                allow_redirects=False,
             ) as resp:
                 resp.raise_for_status()
                 if _has_wordpress_auth_cookie(session, resp):
@@ -306,9 +315,12 @@ async def login(
                     "Échec d'authentification TennisInsight : "
                     f"cookie wordpress_logged_in_* absent ({diag})."
                 )
-                if _is_hard_credential_error(login_error) or attempt >= max_retries - 1:
+                if _is_hard_credential_error(login_error):
                     raise RuntimeError(err_msg)
+                if attempt >= max_retries - 1:
+                    raise TennisInsightOutageError(err_msg)
 
+                cached_hidden_fields = None
                 delay = base_delay * (2 ** attempt)
                 logger.warning(
                     "Login sans cookie (%d/%d : %s). Nouvelle tentative dans %.0fs...",
@@ -329,8 +341,12 @@ async def login(
                 isinstance(err, aiohttp.ClientResponseError)
                 and err.status not in _RETRYABLE_HTTP_STATUSES
             )
-            if is_non_retryable_http or attempt >= max_retries - 1:
+            if is_non_retryable_http:
                 raise
+            if attempt >= max_retries - 1:
+                raise TennisInsightOutageError(
+                    f"TennisInsight indisponible après {max_retries} tentatives : {err}"
+                ) from err
             delay = base_delay * (2 ** attempt)
             logger.warning(
                 "Échec transitoire login TennisInsight (%d/%d : %s). Nouvelle tentative dans %.0fs...",
@@ -352,7 +368,9 @@ async def fetch_match_previews(session: aiohttp.ClientSession) -> Tuple[np.ndarr
         backoff_step=2.0,
     )
     if not html:
-        raise RuntimeError("Impossible de récupérer match-previews sur TennisInsight.")
+        raise TennisInsightOutageError(
+            "Impossible de récupérer match-previews sur TennisInsight."
+        )
     soup = BeautifulSoup(html, "lxml")
     tournaments = np.array([
         tour.text
@@ -398,7 +416,7 @@ async def process_matches(
     atp_elo: str = "",
     wta_elo: str = "",
     db: Optional[TennisDatabase] = None,
-    max_parallel_matches: int = 5,
+    max_parallel_matches: int = 2,
 ) -> str:
     """Traite la liste des matchs en parallèle sous contrôle de débit."""
     clear_session_bets()
@@ -445,7 +463,7 @@ def _notify_daily_results(matchs_str: str, excel_path: str) -> None:
     send_daily_email(bets, total_matches=total_matches, filepath=excel_path)
 
 
-def _parse_cli_args() -> argparse.Namespace:
+def _parse_cli_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pipeline d'analyse de matchs de tennis")
     parser.add_argument(
         "--update-results",
@@ -457,12 +475,29 @@ def _parse_cli_args() -> argparse.Namespace:
         action="store_true",
         help="Met à jour les résultats en attente puis lance l'analyse dans la même session",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--soft-fail-on-outage",
+        action="store_true",
+        help="Quitte proprement (code 0, sans e-mail) en cas de panne 5xx/timeout TennisInsight",
+    )
+    return parser.parse_args(argv)
 
 
-async def main() -> None:
+def _handle_outage(err: TennisInsightOutageError, soft_fail: bool) -> None:
+    if not soft_fail:
+        raise err
+    logger.warning(
+        "Panne transitoire TennisInsight (%s). Arrêt propre (--soft-fail-on-outage), "
+        "aucun e-mail quotidien envoyé.",
+        err,
+    )
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::warning title=TennisInsight indisponible::{err}")
+
+
+async def main(argv: Optional[Sequence[str]] = None) -> None:
     """Point d'entrée principal du pipeline."""
-    args = _parse_cli_args()
+    args = _parse_cli_args(argv)
     db = TennisDatabase()
 
     if args.update_results and not db.get_pending_bets():
@@ -470,41 +505,45 @@ async def main() -> None:
         return
 
     session_config = create_session_config()
-    async with aiohttp.ClientSession(
-        connector=session_config.connector,
-        headers=session_config.header,
-        timeout=session_config.timeout,
-    ) as session:
-        await login(session)
+    try:
+        async with aiohttp.ClientSession(
+            connector=session_config.connector,
+            headers=session_config.header,
+            timeout=session_config.timeout,
+        ) as session:
+            await login(session)
 
-        if args.update_results:
-            await update_pending_results(session, db)
-            return
-
-        if args.with_update_results and db.get_pending_bets():
-            try:
+            if args.update_results:
                 await update_pending_results(session, db)
-            except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, OSError) as err:
-                logger.warning(
-                    "Mise à jour des résultats en échec transitoire (%s), poursuite de l'analyse.",
-                    err,
-                )
+                return
 
-        atp_elo, wta_elo = await asyncio.gather(
-            elo_table("ATP", session=session),
-            elo_table("WTA", session=session),
-        )
-        tournaments, match_urls = await fetch_match_previews(session)
-        matchs = await process_matches(
-            session=session,
-            session_config=session_config,
-            tournaments=tournaments,
-            match_urls=match_urls,
-            atp_elo=atp_elo,
-            wta_elo=wta_elo,
-            db=db,
-            max_parallel_matches=5,
-        )
+            if args.with_update_results and db.get_pending_bets():
+                try:
+                    await update_pending_results(session, db)
+                except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, OSError) as err:
+                    logger.warning(
+                        "Mise à jour des résultats en échec transitoire (%s), poursuite de l'analyse.",
+                        err,
+                    )
+
+            atp_elo, wta_elo = await asyncio.gather(
+                elo_table("ATP", session=session),
+                elo_table("WTA", session=session),
+            )
+            tournaments, match_urls = await fetch_match_previews(session)
+            matchs = await process_matches(
+                session=session,
+                session_config=session_config,
+                tournaments=tournaments,
+                match_urls=match_urls,
+                atp_elo=atp_elo,
+                wta_elo=wta_elo,
+                db=db,
+                max_parallel_matches=2,
+            )
+    except TennisInsightOutageError as err:
+        _handle_outage(err, soft_fail=args.soft_fail_on_outage)
+        return
 
     excel_path = db.export_bets_to_excel()
     if matchs:
