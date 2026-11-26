@@ -1,13 +1,13 @@
-name: Daily Tennis AI Pipeline V1.0
+name: Daily Tennis AI Pipeline
 
 on:
   schedule:
-    # 06:42 UTC (07:42 CET) - Avant ouverture sessions Europe + clôture nuit Amériques
-    - cron: "42 6 * * *"
-    # 13:42 UTC (14:42 CET) - Milieu journée Europe + avant ouverture sessions Amériques
-    - cron: "42 13 * * *"
-    # 21:42 UTC (22:42 CET) - Fin soirée Europe + avant ouverture sessions Asie/Océanie
-    - cron: "42 21 * * *"
+    # 06:23 UTC (07:23 CET) - Avant ouverture sessions Europe + clôture nuit Amériques
+    - cron: "23 6 * * *"
+    # 13:23 UTC (14:23 CET) - Milieu journée Europe + avant ouverture sessions Amériques
+    - cron: "23 13 * * *"
+    # 21:23 UTC (22:23 CET) - Fin soirée Europe + avant ouverture sessions Asie/Océanie
+    - cron: "23 21 * * *"
 
   workflow_dispatch:
 
@@ -41,13 +41,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Mise à jour des résultats en attente (ROI & CLV)
-        env:
-          TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN }}
-          TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD }}
-        run: python main.py --update-results
-
-      - name: Exécution de l'analyse et notification email
+      - name: Mise à jour ROI/CLV, analyse quotidienne et notification email
         env:
           TENNISINSIGHT_LOGIN: ${{ secrets.TENNISINSIGHT_LOGIN }}
           TENNISINSIGHT_PASSWORD: ${{ secrets.TENNISINSIGHT_PASSWORD }}
@@ -56,7 +50,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
-        run: python main.py
+        run: python main.py --with-update-results
 
       - name: Export du dump SQL léger et sauvegarde sur test_neon_4_high
         if: always()

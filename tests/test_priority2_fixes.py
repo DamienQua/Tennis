@@ -157,3 +157,35 @@ def test_locale_independent_english_date_parsing():
 def test_windows_filename_sanitization():
     """Vérifie le nettoyage des caractères interdits Windows dans les chemins Excel."""
     assert _sanitize_fs_name('ATP 500: "Queen\'s" / London?*...') == "ATP_500_Queen's_London"
+
+@pytest.mark.asyncio
+async def test_wordpress_login_retries_on_500_and_timeout(monkeypatch):
+    """Vérifie que login() réessaie sur TimeoutError et HTTP 500 avant de réussir."""
+    import aiohttp
+
+    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
+    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
+
+    class _Error500Context(_FakePostContext):
+        def raise_for_status(self):
+            raise aiohttp.ClientResponseError(
+                request_info=MagicMock(), history=(), status=500, message="Internal Server Error"
+            )
+
+    class _TimeoutContext:
+        async def __aenter__(self):
+            raise asyncio.TimeoutError()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    session = MagicMock()
+    session.cookie_jar = [SimpleNamespace(key="wordpress_logged_in_ok")]
+    session.post.side_effect = [
+        _TimeoutContext(),
+        _Error500Context(),
+        _FakePostContext(cookies={}),
+    ]
+
+    await login(session, max_retries=4, base_delay=0.01)
+    assert session.post.call_count == 3
