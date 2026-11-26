@@ -6,7 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 import time
-from typing import List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 import aiohttp
 from aiolimiter import AsyncLimiter
 from bs4 import BeautifulSoup
@@ -37,7 +37,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+LOGIN_URL = "https://tennisinsight.com/wp-login.php"
 _RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+_HARD_CREDENTIAL_MARKERS = (
+    "incorrect",
+    "invalid username",
+    "invalid email",
+    "unknown username",
+    "unknown email",
+    "not registered",
+    "password you entered",
+)
 
 
 class SessionConfig(NamedTuple):
@@ -183,10 +193,12 @@ def _get_credential(config: dict, key: str) -> str:
 def _has_wordpress_auth_cookie(
     session: aiohttp.ClientSession, response: aiohttp.ClientResponse
 ) -> bool:
-    """Vérifie la présence d'un cookie de session WordPress authentifiée."""
-    resp_cookies = getattr(response, "cookies", None) or {}
-    if any(str(name).startswith("wordpress_logged_in_") for name in resp_cookies):
-        return True
+    """Vérifie la présence d'un cookie de session WordPress (réponse, redirections, cookie_jar)."""
+    responses = [response, *(getattr(response, "history", ()) or ())]
+    for resp_item in responses:
+        resp_cookies = getattr(resp_item, "cookies", None) or {}
+        if any(str(name).startswith("wordpress_logged_in_") for name in resp_cookies):
+            return True
 
     jar = getattr(session, "cookie_jar", None)
     if jar is not None:
@@ -196,12 +208,61 @@ def _has_wordpress_auth_cookie(
     return False
 
 
+def _extract_login_diagnostics(
+    session: aiohttp.ClientSession,
+    response: aiohttp.ClientResponse,
+    body_html: str,
+) -> Tuple[str, str]:
+    """Extrait (message_login_error, resume_diagnostic) sans exposer les valeurs de cookies."""
+    soup = BeautifulSoup(body_html or "", "lxml")
+    title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    err_elem = soup.find(id="login_error")
+    login_error = err_elem.get_text(" ", strip=True) if err_elem else ""
+
+    jar = getattr(session, "cookie_jar", None)
+    cookie_names = sorted({
+        getattr(c, "key", "") for c in (jar or []) if getattr(c, "key", "")
+    })
+    summary = (
+        f"status={getattr(response, 'status', '?')}, "
+        f"url={getattr(response, 'url', LOGIN_URL)}, "
+        f"title={title!r}, "
+        f"cookies={cookie_names}"
+    )
+    if login_error:
+        summary += f", login_error={login_error!r}"
+    return login_error, summary
+
+
+def _is_hard_credential_error(login_error: str) -> bool:
+    low = (login_error or "").lower()
+    return any(marker in low for marker in _HARD_CREDENTIAL_MARKERS)
+
+
+async def _fetch_login_hidden_fields(
+    session: aiohttp.ClientSession, timeout: aiohttp.ClientTimeout
+) -> Dict[str, str]:
+    """Effectue un GET préalable sur wp-login.php pour récupérer testcookie et champs cachés."""
+    hidden_fields: Dict[str, str] = {}
+    async with session.get(LOGIN_URL, timeout=timeout) as get_resp:
+        get_resp.raise_for_status()
+        html = await get_resp.text()
+    soup = BeautifulSoup(html or "", "lxml")
+    form = soup.find("form", id="loginform") or soup.find("form", attrs={"name": "loginform"})
+    if form:
+        for inp in form.find_all("input", attrs={"type": "hidden"}):
+            name = inp.get("name")
+            if name:
+                hidden_fields[name] = inp.get("value", "")
+    return hidden_fields
+
+
 async def login(
     session: aiohttp.ClientSession,
     max_retries: int = 4,
     base_delay: float = 3.0,
 ) -> None:
-    """Authentifie la session sur TennisInsight avec backoff exponentiel sur erreurs transitoires."""
+    """Authentifie la session sur TennisInsight avec pré-GET WordPress et retries intelligents."""
     config = dotenv_values(".env") if os.path.exists(".env") else {}
     username = _get_credential(config, "TENNISINSIGHT_LOGIN")
     password = _get_credential(config, "TENNISINSIGHT_PASSWORD")
@@ -212,28 +273,51 @@ async def login(
         )
 
     login_timeout = aiohttp.ClientTimeout(total=45.0, connect=15.0)
+    post_headers = {
+        "Referer": LOGIN_URL,
+        "Origin": "https://tennisinsight.com",
+    }
 
     for attempt in range(max_retries):
         try:
+            payload = await _fetch_login_hidden_fields(session, login_timeout)
+            payload.update({
+                "log": username,
+                "pwd": password,
+                "wp-submit": "Log In",
+                "rememberme": "forever",
+                "testcookie": "1",
+            })
+
             async with session.post(
-                "https://tennisinsight.com/wp-login.php",
-                data={"log": username, "pwd": password},
+                LOGIN_URL,
+                data=payload,
+                headers=post_headers,
                 timeout=login_timeout,
             ) as resp:
                 resp.raise_for_status()
-                if not _has_wordpress_auth_cookie(session, resp):
-                    body_preview = (await resp.text())[:500].lower()
-                    hint = (
-                        " (erreur login WordPress détectée)"
-                        if "login_error" in body_preview
-                        else ""
-                    )
-                    raise RuntimeError(
-                        "Échec d'authentification TennisInsight : "
-                        f"cookie wordpress_logged_in_* absent{hint}."
-                    )
-                logger.info("Authentification TennisInsight vérifiée avec succès.")
-                return
+                if _has_wordpress_auth_cookie(session, resp):
+                    logger.info("Authentification TennisInsight vérifiée avec succès.")
+                    return
+
+                body_html = await resp.text()
+                login_error, diag = _extract_login_diagnostics(session, resp, body_html)
+                err_msg = (
+                    "Échec d'authentification TennisInsight : "
+                    f"cookie wordpress_logged_in_* absent ({diag})."
+                )
+                if _is_hard_credential_error(login_error) or attempt >= max_retries - 1:
+                    raise RuntimeError(err_msg)
+
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    "Login sans cookie (%d/%d : %s). Nouvelle tentative dans %.0fs...",
+                    attempt + 1,
+                    max_retries,
+                    diag,
+                    delay,
+                )
+                await asyncio.sleep(delay)
         except (
             aiohttp.ClientResponseError,
             aiohttp.ClientError,

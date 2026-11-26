@@ -35,35 +35,6 @@ class _FakePostContext:
         return False
 
 
-@pytest.mark.asyncio
-async def test_wordpress_login_rejects_missing_auth_cookie(monkeypatch):
-    """Vérifie que login() échoue même en HTTP 200 si aucun cookie WordPress n'est présent."""
-    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
-    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "wrong_pass")
-
-    session = MagicMock()
-    session.cookie_jar = []
-    session.post.return_value = _FakePostContext(
-        cookies={}, body='<div id="login_error">Invalid password</div>'
-    )
-
-    with pytest.raises(RuntimeError, match="wordpress_logged_in_"):
-        await login(session)
-
-
-@pytest.mark.asyncio
-async def test_wordpress_login_accepts_valid_cookie(monkeypatch):
-    """Vérifie que login() réussit quand wordpress_logged_in_* est dans la cookie_jar."""
-    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
-    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
-
-    session = MagicMock()
-    session.cookie_jar = [SimpleNamespace(key="wordpress_logged_in_abc123")]
-    session.post.return_value = _FakePostContext(cookies={})
-
-    await login(session)
-
-
 def test_odds_match_short_surname_no_false_positive_and_accents():
     """Vérifie qu'un nom court ('Li') ne matche pas 'Elina' et que les accents sont gérés."""
     match_false = MatchAnalysisData(
@@ -159,8 +130,46 @@ def test_windows_filename_sanitization():
     assert _sanitize_fs_name('ATP 500: "Queen\'s" / London?*...') == "ATP_500_Queen's_London"
 
 @pytest.mark.asyncio
-async def test_wordpress_login_retries_on_500_and_timeout(monkeypatch):
-    """Vérifie que login() réessaie sur TimeoutError et HTTP 500 avant de réussir."""
+async def test_wordpress_login_rejects_missing_auth_cookie_fast_on_credential_error(monkeypatch):
+    """Vérifie que login() échoue sans réessayer sur une vraie erreur d'identifiants (>500 chars)."""
+    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
+    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "wrong_pass")
+
+    long_head = "<html><head>" + ("x" * 1000) + "<title>Log In</title></head><body>"
+    err_body = f'{long_head}<div id="login_error">Error: The password you entered is incorrect.</div></body></html>'
+
+    session = MagicMock()
+    session.cookie_jar = []
+    session.get.return_value = _FakePostContext(
+        body='<form id="loginform"><input type="hidden" name="wp_nonce" value="tok123"/></form>'
+    )
+    session.post.return_value = _FakePostContext(cookies={}, body=err_body)
+
+    with pytest.raises(RuntimeError, match="incorrect"):
+        await login(session, max_retries=4, base_delay=0.01)
+    assert session.post.call_count == 1
+    sent_payload = session.post.call_args.kwargs["data"]
+    assert sent_payload["wp_nonce"] == "tok123"
+    assert sent_payload["testcookie"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_wordpress_login_accepts_valid_cookie(monkeypatch):
+    """Vérifie que login() réussit quand wordpress_logged_in_* est dans la cookie_jar."""
+    monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
+    monkeypatch.setenv("TENNISINSIGHT_PASSWORD", "good_pass")
+
+    session = MagicMock()
+    session.cookie_jar = [SimpleNamespace(key="wordpress_logged_in_abc123")]
+    session.get.return_value = _FakePostContext(body="")
+    session.post.return_value = _FakePostContext(cookies={})
+
+    await login(session, max_retries=2, base_delay=0.01)
+
+
+@pytest.mark.asyncio
+async def test_wordpress_login_retries_on_500_timeout_and_transient_no_cookie(monkeypatch):
+    """Vérifie que login() réessaie sur TimeoutError, HTTP 500 et 200 transitoire sans cookie."""
     import aiohttp
 
     monkeypatch.setenv("TENNISINSIGHT_LOGIN", "user")
@@ -180,12 +189,14 @@ async def test_wordpress_login_retries_on_500_and_timeout(monkeypatch):
             return False
 
     session = MagicMock()
-    session.cookie_jar = [SimpleNamespace(key="wordpress_logged_in_ok")]
+    session.cookie_jar = []
+    session.get.return_value = _FakePostContext(body="")
     session.post.side_effect = [
         _TimeoutContext(),
         _Error500Context(),
-        _FakePostContext(cookies={}),
+        _FakePostContext(cookies={}, body="<html><title>Temporary Cache</title></html>"),
+        _FakePostContext(cookies={"wordpress_logged_in_ok": "1"}),
     ]
 
     await login(session, max_retries=4, base_delay=0.01)
-    assert session.post.call_count == 3
+    assert session.post.call_count == 4
